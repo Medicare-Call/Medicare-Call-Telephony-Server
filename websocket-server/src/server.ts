@@ -9,6 +9,7 @@ import { join } from 'path';
 import cors from 'cors';
 import { handleCallConnection, getSession, closeAllConnections, createSession } from './sessionManager';
 import winston from 'winston';
+import { register, availableCallerNumbersGauge } from './metrics';
 
 dotenv.config();
 
@@ -249,6 +250,20 @@ mainRouter.post('/status-callback', (req: Request, res: Response) => {
     }
 
     res.status(200).send('OK');
+});
+
+// Prometheus metrics 엔드포인트
+app.get('/metrics', async (req: Request, res: Response) => {
+    try {
+        availableCallerNumbersGauge.set(TWILIO_CALLER_NUMBERS.length - activeCallerNumbers.size);
+
+        res.set('Content-Type', register.contentType);
+        const metrics = await register.metrics();
+        res.end(metrics);
+    } catch (err) {
+        logger.error('메트릭 수집 오류:', err);
+        res.status(500).end(err);
+    }
 });
 
 app.use('/call', mainRouter);
