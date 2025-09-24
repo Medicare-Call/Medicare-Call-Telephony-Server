@@ -1,5 +1,7 @@
 import { RawData, WebSocket } from 'ws';
 import AWS from 'aws-sdk';
+import { Writer } from 'wav';
+import { PassThrough } from 'stream';
 
 interface Session {
     sessionId: string;
@@ -16,6 +18,7 @@ interface Session {
     openAIApiKey: string;
     webhookUrl?: string;
     conversationHistory: { is_elderly: boolean; conversation: string }[];
+    audioBuffer: Buffer[];
     startTime?: Date;
     callStatus?: string;
     responded?: number;
@@ -23,6 +26,7 @@ interface Session {
 }
 
 let sessions: Map<string, Session> = new Map();
+const closingSessions = new Set<string>();
 
 export function getSession(sessionId: string): Session | undefined {
     return sessions.get(sessionId);
@@ -47,6 +51,7 @@ export function createSession(
         openAIApiKey: config.openAIApiKey,
         webhookUrl: config.webhookUrl,
         conversationHistory: [],
+        audioBuffer: [],
         startTime: new Date(), // 통화 시작 시간 기록
     };
 
@@ -115,6 +120,9 @@ function handleTwilioMessage(sessionId: string, data: RawData): void {
         case 'media':
             // 실시간 음성 데이터를 OpenAI로 전달
             session.latestMediaTimestamp = msg.media.timestamp;
+
+            const audioChunk = Buffer.from(msg.media.payload, 'base64');
+            session.audioBuffer.push(audioChunk);
 
             if (isOpen(session.modelConn)) {
                 jsonSend(session.modelConn, {
@@ -415,10 +423,11 @@ export function closeAllConnections(sessionId: string): void {
     const session = getSession(sessionId);
     if (!session) return;
 
-    if ((session as any)._closed) {
-        console.log(`이미 종료 처리된 세션 (CallSid: ${session.callSid}) → 중복 호출 방지`);
+    if ((session as any)._closed || closingSessions.has(sessionId)) {
+        console.log(`이미 종료 처리 중이거나 완료된 세션 (CallSid: ${session.callSid}) → 중복 호출 방지`);
         return;
     }
+    closingSessions.add(sessionId);
     (session as any)._closed = true;
 
     console.log(`세션 종료 처리 시작 (CallSid: ${session.callSid})...`);
@@ -431,17 +440,27 @@ export function closeAllConnections(sessionId: string): void {
         }
     };
 
-    const uploadToS3Promise = async () => {
+    const uploadJsonToS3Promise = async () => {
         if (session.conversationHistory && session.conversationHistory.length > 0) {
             try {
                 await uploadConversationToS3(sessionId, session.conversationHistory);
             } catch (error) {
-                console.error(`S3 업로드 Promise 실패 (CallSid: ${session.callSid}):`, error);
+                console.error(`(S3-JSON) 업로드 Promise 실패 (CallSid: ${session.callSid}):`, error);
             }
         }
     };
 
-    Promise.all([sendWebhookPromise(), uploadToS3Promise()]).finally(() => {
+    const uploadAudioToS3Promise = async () => {
+        if (session.audioBuffer && session.audioBuffer.length > 0) {
+            try {
+                await uploadAudioToS3(sessionId, session.audioBuffer);
+            } catch (error) {
+                console.error(`(S3-Audio) 업로드 Promise 실패 (CallSid: ${session.callSid}):`, error);
+            }
+        }
+    };
+
+    Promise.all([sendWebhookPromise, uploadJsonToS3Promise(), uploadAudioToS3Promise()]).finally(() => {
         if (session.twilioConn) {
             session.twilioConn.close();
             session.twilioConn = undefined;
@@ -452,18 +471,47 @@ export function closeAllConnections(sessionId: string): void {
         }
 
         sessions.delete(sessionId);
+        closingSessions.delete(sessionId);
         console.log(`세션 정리 완료 (CallSid: ${session.callSid})`);
     });
 }
 
 // S3에 대화 기록 업로드
 async function uploadConversationToS3(sessionId: string, conversationHistory: any[]): Promise<void> {
+    // ... (기존 JSON 업로드 로직과 동일) ...
     const s3 = new AWS.S3({
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
         region: process.env.AWS_REGION,
     });
+    const bucketName = process.env.S3_BUCKET_NAME;
 
+    if (!bucketName) {
+        console.error('S3_BUCKET_NAME 환경변수가 설정되지 않았습니다.');
+        return;
+    }
+    const fileContent = JSON.stringify(conversationHistory, null, 2);
+    const fileName = `${sessionId}.json`;
+    const params: AWS.S3.PutObjectRequest = {
+        Bucket: bucketName,
+        Key: `conversations/${fileName}`,
+        Body: fileContent,
+        ContentType: 'application/json',
+    };
+    try {
+        await s3.putObject(params).promise();
+        console.log(`(S3-JSON) 대화 기록 업로드 성공: ${params.Key} (CallSid: ${sessionId})`);
+    } catch (error) {
+        console.error(`(S3-JSON) 대화 기록 업로드 실패 (CallSid: ${sessionId}):`, error);
+    }
+}
+
+async function uploadAudioToS3(sessionId: string, audioChunks: Buffer[]): Promise<void> {
+    const s3 = new AWS.S3({
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        region: process.env.AWS_REGION,
+    });
     const bucketName = process.env.S3_BUCKET_NAME;
 
     if (!bucketName) {
@@ -471,23 +519,35 @@ async function uploadConversationToS3(sessionId: string, conversationHistory: an
         return;
     }
 
-    // 파일 내용은 JSON 형태로 변환
-    const fileContent = JSON.stringify(conversationHistory, null, 2);
+    // Twilio Media Stream은 8000Hz, 8-bit μ-law 형식
+    const wavEncoder = new Writer({
+        sampleRate: 8000,
+        channels: 1,
+        bitDepth: 8,
+        format: 7, // 7 for μ-law
+    });
 
-    const fileName = `${sessionId}.json`;
+    const passthrough = new PassThrough();
+    wavEncoder.pipe(passthrough);
 
+    audioChunks.forEach((chunk) => {
+        wavEncoder.write(chunk);
+    });
+    wavEncoder.end();
+
+    const fileName = `${sessionId}.wav`;
     const params: AWS.S3.PutObjectRequest = {
         Bucket: bucketName,
-        Key: `conversations/${fileName}`, // S3 버킷 내에 conversations 폴더를 만들어 저장
-        Body: fileContent,
-        ContentType: 'application/json',
+        Key: `audio/${fileName}`, // 오디오 파일은 audio/ 폴더에 저장
+        Body: passthrough,
+        ContentType: 'audio/wav',
     };
 
     try {
-        await s3.putObject(params).promise();
-        console.log(`(S3) 대화 기록 업로드 성공: ${params.Key} (CallSid: ${sessionId})`);
+        await s3.upload(params).promise();
+        console.log(`(S3-Audio) 오디오 파일 업로드 성공: ${params.Key} (CallSid: ${sessionId})`);
     } catch (error) {
-        console.error(`(S3) 대화 기록 업로드 실패 (CallSid: ${sessionId}):`, error);
+        console.error(`(S3-Audio) 오디오 파일 업로드 실패 (CallSid: ${sessionId}):`, error);
     }
 }
 
