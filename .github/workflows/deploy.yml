@@ -1,78 +1,86 @@
 name: CD Node with Docker
 
 on:
-  push:
-    branches:
-      - 'main'
+    push:
+        branches:
+            - 'main'
 
 permissions:
-  contents: read
+    contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+    build:
+        runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+        steps:
+            - uses: actions/checkout@v4
 
-      - name: 🐳 Docker build & push
-        run: |
-          docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-          cd websocket-server
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE_NODE }} .
-          docker push ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE_NODE }}
+            - name: 🐳 Docker build & push
+              run: |
+                  docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+                  cd websocket-server
+                  docker build -t ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE_NODE }} .
+                  docker push ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE_NODE }}
 
-      - name: deploy to server (Node)
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_KEY }}
-          port: ${{ secrets.EC2_PORT }}
-          script: |
-            DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
-            DOCKER_IMAGE_NODE="${{ secrets.DOCKER_IMAGE_NODE }}"
-            NODE_PORT="${{ secrets.NODE_PORT }}"
-            OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}"
-            PUBLIC_URL="${{ secrets.PUBLIC_URL }}"
-            WEBHOOK_URL="${{ secrets.WEBHOOK_URL }}"
-            TWILIO_ACCOUNT_SID="${{ secrets.TWILIO_ACCOUNT_SID }}"
-            TWILIO_AUTH_TOKEN="${{ secrets.TWILIO_AUTH_TOKEN }}"
-            TWILIO_CALLER_NUMBERS="${{ secrets.TWILIO_CALLER_NUMBERS }}"
-            TWILIO_RECIPIENT_NUMBER="${{ secrets.TWILIO_RECIPIENT_NUMBER }}"
-            REDIS_HOST="${{ secrets.REDIS_HOST }}"
-            REDIS_PORT="${{ secrets.REDIS_PORT }}"
+            - name: deploy to server (Node)
+              uses: appleboy/ssh-action@master
+              with:
+                  host: ${{ secrets.EC2_HOST }}
+                  username: ${{ secrets.EC2_USERNAME }}
+                  key: ${{ secrets.EC2_KEY }}
+                  port: ${{ secrets.EC2_PORT }}
+                  script: |
+                      DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
+                      DOCKER_IMAGE_NODE="${{ secrets.DOCKER_IMAGE_NODE }}"
+                      NODE_PORT="${{ secrets.NODE_PORT }}"
+                      OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}"
+                      PUBLIC_URL="${{ secrets.PUBLIC_URL }}"
+                      WEBHOOK_URL="${{ secrets.WEBHOOK_URL }}"
+                      TWILIO_ACCOUNT_SID="${{ secrets.TWILIO_ACCOUNT_SID }}"
+                      TWILIO_AUTH_TOKEN="${{ secrets.TWILIO_AUTH_TOKEN }}"
+                      TWILIO_CALLER_NUMBERS="${{ secrets.TWILIO_CALLER_NUMBERS }}"
+                      TWILIO_RECIPIENT_NUMBER="${{ secrets.TWILIO_RECIPIENT_NUMBER }}"
+                      REDIS_HOST="${{ secrets.REDIS_HOST }}"
+                      REDIS_PORT="${{ secrets.REDIS_PORT }}"
+                      AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+                      AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+                      AWS_REGION="${{ secrets.AWS_REGION }}"
+                      S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
 
-            echo "Stopping existing container"
-            sudo docker stop medicare-node || true
-            sudo docker rm medicare-node || true
+                      echo "Stopping existing container"
+                      sudo docker stop medicare-node || true
+                      sudo docker rm medicare-node || true
 
-            echo "Current containers:"
-            sudo docker ps -a
+                      echo "Current containers:"
+                      sudo docker ps -a
 
-            echo "Pulling new image"
-            sudo docker pull ${DOCKER_USERNAME}/${DOCKER_IMAGE_NODE}
+                      echo "Pulling new image"
+                      sudo docker pull ${DOCKER_USERNAME}/${DOCKER_IMAGE_NODE}
 
-            echo "이미지명: ${DOCKER_USERNAME}/${DOCKER_IMAGE_NODE}"
+                      echo "이미지명: ${DOCKER_USERNAME}/${DOCKER_IMAGE_NODE}"
 
-            echo "Running new node container"
-            sudo docker run -d -p "${NODE_PORT}:8081" --name medicare-node \
-            -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
-            -e PUBLIC_URL="${PUBLIC_URL}" \
-            -e WEBHOOK_URL="${WEBHOOK_URL}" \
-            -e TWILIO_ACCOUNT_SID="${TWILIO_ACCOUNT_SID}" \
-            -e TWILIO_AUTH_TOKEN="${TWILIO_AUTH_TOKEN}" \
-            -e TWILIO_CALLER_NUMBERS="${TWILIO_CALLER_NUMBERS}" \
-            -e TWILIO_RECIPIENT_NUMBER="${TWILIO_RECIPIENT_NUMBER}" \
-            -e REDIS_HOST="${REDIS_HOST}" \
-            -e REDIS_PORT="${REDIS_PORT}" \
-            "${DOCKER_USERNAME}/${DOCKER_IMAGE_NODE}"
+                      echo "Running new node container"
+                      sudo docker run -d -p "${NODE_PORT}:8081" --name medicare-node \
+                      -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+                      -e PUBLIC_URL="${PUBLIC_URL}" \
+                      -e WEBHOOK_URL="${WEBHOOK_URL}" \
+                      -e TWILIO_ACCOUNT_SID="${TWILIO_ACCOUNT_SID}" \
+                      -e TWILIO_AUTH_TOKEN="${TWILIO_AUTH_TOKEN}" \
+                      -e TWILIO_CALLER_NUMBERS="${TWILIO_CALLER_NUMBERS}" \
+                      -e TWILIO_RECIPIENT_NUMBER="${TWILIO_RECIPIENT_NUMBER}" \
+                      -e REDIS_HOST="${REDIS_HOST}" \
+                      -e REDIS_PORT="${REDIS_PORT}" \
+                      -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+                      -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+                      -e AWS_REGION="${AWS_REGION}" \
+                      -e S3_BUCKET_NAME="${S3_BUCKET_NAME}" 
+                      "${DOCKER_USERNAME}/${DOCKER_IMAGE_NODE}"
 
-            # 컨테이너 실행 확인
-            echo "컨테이너 실행 상태 확인:"
-            sudo docker ps -a | grep medicare-node
+                      # 컨테이너 실행 확인
+                      echo "컨테이너 실행 상태 확인:"
+                      sudo docker ps -a | grep medicare-node
 
-            echo "Cleaning up old images"
-            sudo docker image prune -f
+                      echo "Cleaning up old images"
+                      sudo docker image prune -f
 
-            echo "Node Deployment completed successfully!"
+                      echo "Node Deployment completed successfully!"
