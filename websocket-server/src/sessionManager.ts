@@ -1,4 +1,5 @@
 import { RawData, WebSocket } from 'ws';
+import AWS from 'aws-sdk';
 
 interface Session {
     sessionId: string;
@@ -27,6 +28,12 @@ export function getSession(sessionId: string): Session | undefined {
     return sessions.get(sessionId);
 }
 
+const s3 = new AWS.S3({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    region: process.env.AWS_REGION,
+});
+
 export function createSession(
     callSid: string,
     config: {
@@ -54,7 +61,7 @@ export function createSession(
     return session;
 }
 
-// === 📞 전화 연결 처리 함수 ===
+// === 전화 연결 처리 함수 ===
 export function handleCallConnection(
     ws: WebSocket,
     openAIApiKey: string,
@@ -430,7 +437,18 @@ export function closeAllConnections(sessionId: string): void {
         }
     };
 
-    Promise.resolve(sendWebhookPromise()).finally(() => {
+    const uploadToS3Promise = async () => {
+        if (session.conversationHistory && session.conversationHistory.length > 0) {
+            try {
+                await uploadConversationToS3(sessionId, session.conversationHistory);
+            } catch (error) {
+                console.error(`S3 업로드 Promise 실패 (CallSid: ${session.callSid}):`, error);
+            }
+        }
+    };
+
+    Promise.all([sendWebhookPromise(), uploadToS3Promise()]).finally(() => {
+        // 👈 [수정] Promise.all 사용
         if (session.twilioConn) {
             session.twilioConn.close();
             session.twilioConn = undefined;
@@ -443,6 +461,35 @@ export function closeAllConnections(sessionId: string): void {
         sessions.delete(sessionId);
         console.log(`세션 정리 완료 (CallSid: ${session.callSid})`);
     });
+}
+
+// S3에 대화 기록 업로드
+async function uploadConversationToS3(sessionId: string, conversationHistory: any[]): Promise<void> {
+    const bucketName = process.env.S3_BUCKET_NAME;
+
+    if (!bucketName) {
+        console.error('S3_BUCKET_NAME 환경변수가 설정되지 않았습니다.');
+        return;
+    }
+
+    // 파일 내용은 JSON 형태로 변환
+    const fileContent = JSON.stringify(conversationHistory, null, 2);
+
+    const fileName = `${sessionId}.json`;
+
+    const params: AWS.S3.PutObjectRequest = {
+        Bucket: bucketName,
+        Key: `conversations/${fileName}`, // S3 버킷 내에 conversations 폴더를 만들어 저장
+        Body: fileContent,
+        ContentType: 'application/json',
+    };
+
+    try {
+        await s3.putObject(params).promise();
+        console.log(`(S3) 대화 기록 업로드 성공: ${params.Key} (CallSid: ${sessionId})`);
+    } catch (error) {
+        console.error(`S3) 대화 기록 업로드 실패 (CallSid: ${sessionId}):`, error);
+    }
 }
 
 // === 유틸리티 함수들 ===
