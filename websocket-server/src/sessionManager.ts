@@ -487,7 +487,7 @@ async function uploadConversationToS3(sessionId: string, conversationHistory: an
         await s3.putObject(params).promise();
         console.log(`(S3) 대화 기록 업로드 성공: ${params.Key} (CallSid: ${sessionId})`);
     } catch (error) {
-        console.error(`S3) 대화 기록 업로드 실패 (CallSid: ${sessionId}):`, error);
+        console.error(`(S3) 대화 기록 업로드 실패 (CallSid: ${sessionId}):`, error);
     }
 }
 
