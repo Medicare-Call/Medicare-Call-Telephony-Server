@@ -28,12 +28,6 @@ export function getSession(sessionId: string): Session | undefined {
     return sessions.get(sessionId);
 }
 
-const s3 = new AWS.S3({
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    region: process.env.AWS_REGION,
-});
-
 export function createSession(
     callSid: string,
     config: {
@@ -448,7 +442,6 @@ export function closeAllConnections(sessionId: string): void {
     };
 
     Promise.all([sendWebhookPromise(), uploadToS3Promise()]).finally(() => {
-        // 👈 [수정] Promise.all 사용
         if (session.twilioConn) {
             session.twilioConn.close();
             session.twilioConn = undefined;
@@ -465,6 +458,12 @@ export function closeAllConnections(sessionId: string): void {
 
 // S3에 대화 기록 업로드
 async function uploadConversationToS3(sessionId: string, conversationHistory: any[]): Promise<void> {
+    const s3 = new AWS.S3({
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        region: process.env.AWS_REGION,
+    });
+
     const bucketName = process.env.S3_BUCKET_NAME;
 
     if (!bucketName) {

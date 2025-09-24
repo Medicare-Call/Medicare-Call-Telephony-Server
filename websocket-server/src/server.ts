@@ -13,6 +13,13 @@ import { register, availableCallerNumbersGauge } from './metrics';
 
 dotenv.config();
 
+console.log('--- .env 파일 로딩 상태 확인 ---');
+console.log('AWS_ACCESS_KEY_ID:', process.env.AWS_ACCESS_KEY_ID);
+console.log('AWS_SECRET_ACCESS_KEY:', process.env.AWS_SECRET_ACCESS_KEY);
+console.log('AWS_REGION:', process.env.AWS_REGION);
+console.log('S3_BUCKET_NAME:', process.env.S3_BUCKET_NAME);
+console.log('---------------------------------');
+
 const logger = winston.createLogger({
     level: 'info',
     format: winston.format.combine(winston.format.timestamp(), winston.format.simple()),
