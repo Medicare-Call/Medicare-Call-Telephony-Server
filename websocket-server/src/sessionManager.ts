@@ -241,6 +241,9 @@ function handleOpenAIMessage(sessionId: string, data: RawData): void {
                 }
                 if (event.item_id) session.lastAssistantItem = event.item_id;
 
+                const aiAudioChunk = Buffer.from(event.delta, 'base64');
+                session.audioBuffer.push(aiAudioChunk);
+
                 jsonSend(session.twilioConn, {
                     event: 'media',
                     streamSid: session.streamSid,
