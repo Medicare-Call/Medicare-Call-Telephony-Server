@@ -151,7 +151,7 @@ function connectToOpenAI(sessionId: string): void {
 
     console.log(`OpenAI 연결 중... (CallSid: ${session.callSid})`);
 
-    session.modelConn = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-realtime', {
+    session.modelConn = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-previwe', {
         headers: {
             Authorization: `Bearer ${session.openAIApiKey}`,
             'OpenAI-Beta': 'realtime=v1',
