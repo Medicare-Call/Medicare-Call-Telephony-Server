@@ -177,7 +177,6 @@ function connectToOpenAI(sessionId: string): void {
                 input_audio_format: 'g711_ulaw',
                 output_audio_format: 'g711_ulaw',
                 input_audio_noise_reduction: { type: 'near_field' },
-                frequency_penalty: 0.4
             },
         };
 
