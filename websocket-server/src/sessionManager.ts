@@ -463,7 +463,7 @@ export function closeAllConnections(sessionId: string): void {
         }
     };
 
-    Promise.all([sendWebhookPromise, uploadJsonToS3Promise(), uploadAudioToS3Promise()]).finally(() => {
+    Promise.all([sendWebhookPromise(), uploadJsonToS3Promise(), uploadAudioToS3Promise()]).finally(() => {
         if (session.twilioConn) {
             session.twilioConn.close();
             session.twilioConn = undefined;
