@@ -8,7 +8,6 @@ COPY tsconfig.json ./
 COPY src ./src
 # tsconfig.json 설정에 따라 src 폴더를 빌드하여 dist 폴더에 JavaScript로 컴파일
 RUN npm run build
-COPY src/twiml.xml ./dist/twiml.xml
 
 # --- 런타임 스테이지 ---
 FROM node:23-slim
