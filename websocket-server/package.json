@@ -2,11 +2,11 @@
   "name": "twilio-realtime",
   "version": "1.0.0",
   "description": "Twilio real-time server with TypeScript",
-  "main": "dist/server.js",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node dist/server.js",
-    "dev": "nodemon --watch 'src/**/*' --watch '.env' --ext 'ts,js,xml,env' --exec 'ts-node' src/server.ts",
     "build": "tsc && cp src/twiml.xml dist/",
+    "start": "node dist/index.js",
+    "dev": "nodemon --watch 'src/**/*' --watch '.env' --ext 'ts,js,xml,env' --exec 'ts-node' src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:webhook": "npm run build && node test-webhook.js",
     "test:webhook:custom": "npm run build && node test-webhook.js --custom"
