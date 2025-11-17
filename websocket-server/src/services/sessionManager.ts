@@ -2,8 +2,9 @@ import { RawData, WebSocket } from 'ws';
 import AWS from 'aws-sdk';
 import { Writer } from 'wav';
 import { PassThrough } from 'stream';
+import { processAudioWithVAD, VadState } from './vad.service';
 
-interface Session {
+interface Session extends VadState {
     sessionId: string;
     callSid: string;
     elderId?: number;
@@ -53,6 +54,9 @@ export function createSession(
         conversationHistory: [],
         audioBuffer: [],
         startTime: new Date(), // 통화 시작 시간 기록
+        isSpeaking: false,
+        vadAudioBuffer: [],
+        lastVoiceTimestamp: 0
     };
 
     sessions.set(callSid, session);
@@ -84,7 +88,7 @@ export function handleCallConnection(
     // 기존 세션에 WebSocket 연결을 추가합니다.
     session.twilioConn = ws;
 
-    ws.on('message', (data) => handleTwilioMessage(sessionId, data));
+    ws.on('message', (data) => handleTwilioMessage(sessionId, data).catch(console.error));
     ws.on('error', () => ws.close());
     ws.on('close', () => closeAllConnections(sessionId)); // closeAllConnections는 status-callback에서 주로 호출됩니다.
 
@@ -93,7 +97,7 @@ export function handleCallConnection(
 }
 
 // === 실시간 대화 처리  ===
-function handleTwilioMessage(sessionId: string, data: RawData): void {
+async function handleTwilioMessage(sessionId: string, data: RawData): Promise<void> {
     const session = getSession(sessionId);
     if (!session) return;
 
@@ -118,11 +122,21 @@ function handleTwilioMessage(sessionId: string, data: RawData): void {
             break;
 
         case 'media':
-            // 실시간 음성 데이터를 OpenAI로 전달
             session.latestMediaTimestamp = msg.media.timestamp;
 
             const audioChunk = Buffer.from(msg.media.payload, 'base64');
-            session.audioBuffer.push(audioChunk);
+            
+            // 1. 전체 통화 녹음용 버퍼
+            session.audioBuffer.push(audioChunk); 
+
+            // 2. VAD 처리
+            const vadResult = await processAudioWithVAD(session, audioChunk, session.callSid);
+
+            if (vadResult.speechEnded && vadResult.utterance) {
+                console.log(`[STT] ${vadResult.utterance.length} bytes 전송 (CallSid: ${session.callSid})`);
+                
+                // TODO: STT 서비스로 전송
+            }
 
             if (isOpen(session.modelConn)) {
                 jsonSend(session.modelConn, {
@@ -135,6 +149,11 @@ function handleTwilioMessage(sessionId: string, data: RawData): void {
         case 'stop':
         case 'close':
             console.log(`통화 종료 신호 수신 (CallSid: ${session.callSid})`);
+            if (session.isSpeaking && session.vadAudioBuffer.length > 0) {
+                const finalUtterance = Buffer.concat(session.vadAudioBuffer);
+                console.log(`[STT] 마지막 ${finalUtterance.length} bytes의 음성 데이터를 STT 서비스로 전송합니다. (CallSid: ${session.callSid})`);
+                // sttService.process(finalUtterance);
+            }
             closeAllConnections(sessionId);
             break;
     }
@@ -184,12 +203,11 @@ function connectToOpenAI(sessionId: string): void {
 
         // 프롬프트 전송
         if (session.prompt) {
-            sendUserMessage(sessionId, session.prompt);
+            sendUserMessageToAI(sessionId, session.prompt);
         }
     });
 
     session.modelConn.on('message', (data) => {
-        const ts = Date.now();
         handleOpenAIMessage(sessionId, data);
     });
     session.modelConn.on('error', (error) => {
@@ -201,9 +219,13 @@ function connectToOpenAI(sessionId: string): void {
 }
 
 // === 사용자 메시지 전송 ===
-function sendUserMessage(sessionId: string, text: string): void {
+export function sendUserMessageToAI(sessionId: string, text: string): void {
     const session = getSession(sessionId);
     if (!session || !isOpen(session.modelConn)) return;
+
+    console.log(`사용자 (STT): ${text}`);
+    // TODO: STT 연결한 뒤에는 이쪽에서 push해야 할 것 같다
+    // session.conversationHistory.push({ is_elderly: true, conversation: text });
 
     const userMessage = {
         type: 'conversation.item.create',

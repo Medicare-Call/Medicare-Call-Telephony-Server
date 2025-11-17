@@ -11,7 +11,11 @@
     "rootDir": "./src",
     "noEmitOnError": true,
     "resolveJsonModule": true, 
-    "incremental": true 
+    "incremental": true,
+    "typeRoots": [
+      "./src/types",
+      "./node_modules/@types"
+    ]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules"]
