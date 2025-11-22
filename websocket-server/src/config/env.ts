@@ -13,6 +13,10 @@ export const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 
 export const TWILIO_CALLER_NUMBERS = process.env.TWILIO_CALLER_NUMBERS?.split(',').map((num) => num.trim()) || [];
 
+export const TTS_MODEL = process.env.TTS_MODEL || 'tts-1';
+export const TTS_VOICE = process.env.TTS_VOICE || 'alloy'; // 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'
+export const TTS_SPEED = process.env.TTS_SPEED || '1.0';
+
 if (TWILIO_CALLER_NUMBERS.length === 0) {
     logger.error('TWILIO_CALLER_NUMBERS environment variable is required (comma-separated)');
     process.exit(1);
