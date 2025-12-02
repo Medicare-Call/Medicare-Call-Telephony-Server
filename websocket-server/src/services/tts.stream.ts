@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 import logger from '../config/logger';
 import { TTSService } from './tts.service';
+import { AudioUtils } from '../utils/audio.utils';
 
 // Twilio 스트림 전송 옵션
 export interface TwilioStreamOptions {
@@ -66,7 +67,7 @@ export class TTSStreamer {
         }
 
         // 청크로 분할
-        const chunks = this.ttsService.splitIntoChunks(ulawAudio, chunkSize);
+        const chunks = AudioUtils.splitIntoChunks(ulawAudio, chunkSize);
         logger.info(`Twilio로 스트리밍 시작: ${chunks.length} 청크, ${ulawAudio.length} bytes`);
 
         let sentChunks = 0;
