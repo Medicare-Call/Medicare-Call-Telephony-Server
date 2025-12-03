@@ -1,25 +1,12 @@
 import { WebSocket } from 'ws';
-import logger from '../config/logger';
+import logger from '../../config/logger';
 import { TTSService } from './tts.service';
-import { AudioUtils } from '../utils/audio.utils';
+import { TwilioStreamOptions, TTSStreamResult } from './tts.types';
+import { AudioUtils } from '../../utils/audio.utils';
 
-// Twilio 스트림 전송 옵션
-export interface TwilioStreamOptions {
-    streamSid: string;
-    twilioConn: WebSocket;
-    chunkSize?: number; // 기본: 160 bytes
-    chunkIntervalMs?: number; // 기본: 20ms
-}
-
-// TTS 스트리밍 결과
-export interface TTSStreamResult {
-    success: boolean;
-    totalChunks: number;
-    totalBytes: number;
-    durationMs?: number;
-    error?: string;
-}
-
+/**
+ * TTS 오디오를 Twilio로 스트리밍하는 클래스
+ */
 export class TTSStreamer {
     private ttsService: TTSService;
 
@@ -27,7 +14,12 @@ export class TTSStreamer {
         this.ttsService = ttsService;
     }
 
-    // 텍스트를 TTS로 변환하고 Twilio로 스트리밍
+    /**
+     * 텍스트를 TTS로 변환하고 Twilio로 스트리밍
+     * @param text 변환할 텍스트
+     * @param options Twilio 스트림 옵션
+     * @returns 스트리밍 결과
+     */
     async streamTextToTwilio(text: string, options: TwilioStreamOptions): Promise<TTSStreamResult> {
         const startTime = Date.now();
 
@@ -53,6 +45,12 @@ export class TTSStreamer {
         }
     }
 
+    /**
+     * 오디오 버퍼를 Twilio로 스트리밍
+     * @param ulawAudio ulaw 형식 오디오 버퍼
+     * @param options Twilio 스트림 옵션
+     * @returns 스트리밍 결과
+     */
     async streamAudioToTwilio(ulawAudio: Buffer, options: TwilioStreamOptions): Promise<TTSStreamResult> {
         const { streamSid, twilioConn, chunkSize = 160, chunkIntervalMs = 20 } = options;
 
@@ -97,7 +95,7 @@ export class TTSStreamer {
             this.sendToTwilio(twilioConn, mediaEvent);
             sentChunks++;
 
-            // 마크 이벤트 전송 -> Twillio 측에서 음성 발송이 끝났다는 응답을 가능하게 함
+            // 마크 이벤트 전송 -> Twilio 측에서 음성 발송이 끝났다는 응답을 가능하게 함
             if (sentChunks % 10 === 0) {
                 // 10개 청크마다 mark
                 this.sendToTwilio(twilioConn, {
@@ -132,6 +130,21 @@ export class TTSStreamer {
         };
     }
 
+    /**
+     * 현재 재생 중인 오디오를 중단하고 버퍼 클리어
+     * @param twilioConn Twilio WebSocket 연결
+     * @param streamSid 스트림 ID
+     */
+    clearTwilioStream(twilioConn: WebSocket, streamSid: string): void {
+        if (this.isWebSocketOpen(twilioConn)) {
+            this.sendToTwilio(twilioConn, {
+                event: 'clear',
+                streamSid,
+            });
+            logger.info(`Twilio 스트림 클리어: ${streamSid}`);
+        }
+    }
+
     private sendToTwilio(ws: WebSocket, data: any): void {
         if (this.isWebSocketOpen(ws)) {
             ws.send(JSON.stringify(data));
@@ -145,32 +158,4 @@ export class TTSStreamer {
     private sleep(ms: number): Promise<void> {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
-
-    // 현재 재생 중인 오디오를 중단하고 버퍼 클리어
-    clearTwilioStream(twilioConn: WebSocket, streamSid: string): void {
-        if (this.isWebSocketOpen(twilioConn)) {
-            this.sendToTwilio(twilioConn, {
-                event: 'clear',
-                streamSid,
-            });
-            logger.info(`Twilio 스트림 클리어: ${streamSid}`);
-        }
-    }
 }
-
-// 헬퍼 함수: 텍스트를 TTS로 변환하고 Twilio로 스트리밍
-export async function sendTTSToTwilio(
-    ttsService: TTSService,
-    text: string,
-    twilioConn: WebSocket,
-    streamSid: string
-): Promise<TTSStreamResult> {
-    const streamer = new TTSStreamer(ttsService);
-
-    return streamer.streamTextToTwilio(text, {
-        streamSid,
-        twilioConn,
-    });
-}
-
-export default TTSStreamer;

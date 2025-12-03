@@ -1,14 +1,11 @@
 import OpenAI from 'openai';
-import logger from '../config/logger';
-import { OPENAI_API_KEY, TTS_MODEL, TTS_VOICE, TTS_SPEED } from '../config/env';
-import { AudioUtils } from '../utils/audio.utils';
+import logger from '../../config/logger';
+import { TTSConfig } from './tts.types';
+import { AudioUtils } from '../../utils/audio.utils';
 
-export interface TTSConfig {
-    model?: 'tts-1' | 'tts-1-hd';
-    voice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
-    speed?: number; // 0.25 ~ 4.0
-}
-
+/**
+ * OpenAI TTS 음성 합성 서비스
+ */
 export class TTSService {
     private client: OpenAI;
     private config: Required<TTSConfig>;
@@ -35,7 +32,11 @@ export class TTSService {
         });
     }
 
-    // 텍스트를 g711_ulaw 형식의 오디오로 변환
+    /**
+     * 텍스트를 g711_ulaw 형식의 오디오로 변환
+     * @param text 변환할 텍스트
+     * @returns ulaw 형식 오디오 버퍼
+     */
     async synthesizeSpeechToUlaw(text: string): Promise<Buffer> {
         if (!text || text.trim().length === 0) {
             throw new Error('텍스트가 비어있습니다');
@@ -66,25 +67,10 @@ export class TTSService {
         }
     }
 
+    /**
+     * 현재 TTS 설정 조회
+     */
     getConfig(): Required<TTSConfig> {
         return { ...this.config };
     }
 }
-
-// 기본 TTS 서비스 인스턴스 생성 함수
-// 환경 변수를 사용하여 초기화 진행 (env.ts의 상수 사용)
-export function createDefaultTTSService(): TTSService {
-    if (!OPENAI_API_KEY) {
-        throw new Error('OPENAI_API_KEY 환경 변수가 필요합니다.');
-    }
-
-    const config: TTSConfig = {
-        model: TTS_MODEL as 'tts-1' | 'tts-1-hd',
-        voice: TTS_VOICE as any, // 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'
-        speed: parseFloat(TTS_SPEED),
-    };
-
-    return new TTSService(OPENAI_API_KEY, config);
-}
-
-export default TTSService;
