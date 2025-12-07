@@ -9,7 +9,8 @@
     "dev": "NODE_ENV=local nodemon --watch 'src/**/*' --watch '.env' --ext 'ts,js,xml,env' --exec 'ts-node' src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:webhook": "npm run build && node test-webhook.js",
-    "test:webhook:custom": "npm run build && node test-webhook.js --custom"
+    "test:webhook:custom": "npm run build && node test-webhook.js --custom",
+    "test:stt": "ts-node test-stt-service.ts"
   },
   "keywords": [],
   "author": "",
