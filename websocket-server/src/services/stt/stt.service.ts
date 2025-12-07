@@ -95,7 +95,7 @@ export class STTService {
             // 2. WebSocket URL 생성
             const params = new URLSearchParams({
                 sample_rate: this.config.sampleRate.toString(),
-                encoding: 'LINEAR16', // PCM16
+                encoding: 'MULAW',
                 use_itn: this.config.useItn.toString(),
                 use_disfluency_filter: this.config.useDisfluencyFilter.toString(),
                 use_profanity_filter: this.config.useProfanityFilter.toString(),
