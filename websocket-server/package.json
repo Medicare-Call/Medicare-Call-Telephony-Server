@@ -9,12 +9,15 @@
     "dev": "NODE_ENV=local nodemon --watch 'src/**/*' --watch '.env' --ext 'ts,js,xml,env' --exec 'ts-node' src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:webhook": "npm run build && node test-webhook.js",
-    "test:webhook:custom": "npm run build && node test-webhook.js --custom"
+    "test:webhook:custom": "npm run build && node test-webhook.js --custom",
+    "test:llm": "ts-node test-llm-service.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@langchain/core": "^1.1.0",
+    "@langchain/openai": "^1.1.3",
     "aws-sdk": "^2.1692.0",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
