@@ -10,6 +10,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:webhook": "npm run build && node test-webhook.js",
     "test:webhook:custom": "npm run build && node test-webhook.js --custom",
+    "test:stt": "ts-node test-stt-service.ts",
     "test:llm": "ts-node test-llm-service.ts",
     "test:tts": "ts-node test-tts-service.ts"
   },

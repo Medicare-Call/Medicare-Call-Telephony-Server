@@ -13,6 +13,11 @@ export const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 
 export const TWILIO_CALLER_NUMBERS = process.env.TWILIO_CALLER_NUMBERS?.split(',').map((num) => num.trim()) || [];
 
+// RTZR STT
+export const RTZR_CLIENT_ID = process.env.RTZR_CLIENT_ID || '';
+export const RTZR_CLIENT_SECRET = process.env.RTZR_CLIENT_SECRET || '';
+
+// GPT-4o TTS
 export const TTS_MODEL = process.env.TTS_MODEL || 'tts-1';
 export const TTS_VOICE = process.env.TTS_VOICE || 'alloy'; // 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'
 export const TTS_SPEED = process.env.TTS_SPEED || '1.0';
@@ -24,5 +29,10 @@ if (TWILIO_CALLER_NUMBERS.length === 0) {
 
 if (!OPENAI_API_KEY) {
     logger.error('OPENAI_API_KEY environment variable is required');
+    process.exit(1);
+}
+
+if (!RTZR_CLIENT_ID || !RTZR_CLIENT_SECRET) {
+    logger.error('RTZR_CLIENT_ID and RTZR_CLIENT_SECRET environment variables are required');
     process.exit(1);
 }
