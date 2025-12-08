@@ -192,9 +192,9 @@ export class STTService {
 
     /**
      * 오디오 청크 전송
-     * VAD에서 변환된 PCM16 버퍼를 전송
+     * VAD에서 변환된 MULAW 버퍼를 전송
      * @param sessionId 세션 ID
-     * @param audioChunk PCM16 오디오 버퍼
+     * @param audioChunk MULAW 오디오 버퍼
      */
     sendAudio(sessionId: string, audioChunk: Buffer): void {
         const session = this.sessions.get(sessionId);
