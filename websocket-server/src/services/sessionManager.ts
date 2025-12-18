@@ -1,29 +1,37 @@
-import { RawData, WebSocket } from 'ws';
+import { WebSocket } from 'ws';
 import AWS from 'aws-sdk';
 import { Writer } from 'wav';
 import { PassThrough } from 'stream';
-import { processAudioWithVAD, VadState } from './vad.service';
+import { VadState } from './vad.service';
+import { isOpen } from '../utils/websocket.utils';
 
-interface Session extends VadState {
+export interface Session extends VadState {
     sessionId: string;
     callSid: string;
     elderId?: number;
     settingId?: number;
     prompt?: string;
     twilioConn?: WebSocket;
-    modelConn?: WebSocket;
     streamSid?: string;
-    lastAssistantItem?: string;
-    responseStartTimestamp?: number;
     latestMediaTimestamp?: number;
     openAIApiKey: string;
     webhookUrl?: string;
     conversationHistory: { is_elderly: boolean; conversation: string }[];
     audioBuffer: Buffer[];
     startTime?: Date;
+    endTime?: Date;
     callStatus?: string;
     responded?: number;
-    endTime?: Date;
+    pipeline?: 'realtime' | 'modular';
+
+    // Realtime Pipeline 전용
+    modelConn?: WebSocket; // GPT Realtime API 연결
+    lastAssistantItem?: string;
+    responseStartTimestamp?: number;
+
+    // Modular Pipeline 전용
+    transcriptBuffer?: string[]; // STT final 결과를 누적, VAD speechEnded 시 LLM에 전달
+    isTTSPlaying?: boolean; // TTS 재생 중 여부
 }
 
 let sessions: Map<string, Session> = new Map();
@@ -41,11 +49,12 @@ export function createSession(
         settingId?: number;
         prompt?: string;
         webhookUrl?: string;
+        pipeline?: 'realtime' | 'modular';
     }
 ): Session {
     const session: Session = {
-        sessionId: callSid, // sessionId = callSid
-        callSid: callSid, // CallSid 명시적 저장
+        sessionId: callSid,
+        callSid: callSid,
         elderId: config.elderId,
         settingId: config.settingId,
         prompt: config.prompt,
@@ -53,305 +62,22 @@ export function createSession(
         webhookUrl: config.webhookUrl,
         conversationHistory: [],
         audioBuffer: [],
-        startTime: new Date(), // 통화 시작 시간 기록
+        startTime: new Date(),
+        pipeline: config.pipeline,
+        // VadState 필드 초기화
         isSpeaking: false,
         vadAudioBuffer: [],
-        lastVoiceTimestamp: 0
+        lastVoiceTimestamp: 0,
+        speechStartTimestamp: 0,
     };
 
     sessions.set(callSid, session);
-    console.log(`새 세션 생성: ${callSid} (CallSid 사용, elderId: ${config.elderId || 'N/A'})`);
+    console.log(
+        `새 세션 생성: ${callSid} (CallSid 사용, elderId: ${config.elderId || 'N/A'}, pipeline: ${
+            config.pipeline || 'realtime'
+        })`
+    );
     return session;
-}
-
-// === 전화 연결 처리 함수 ===
-export function handleCallConnection(
-    ws: WebSocket,
-    openAIApiKey: string,
-    webhookUrl?: string,
-    elderId?: number,
-    settingId?: number,
-    prompt?: string,
-    callSid?: string
-): string {
-    const sessionId = callSid || `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    const session = getSession(sessionId);
-    if (!session) {
-        console.error(
-            `[Error] WebSocket 연결 시 세션을 찾을 수 없습니다: ${sessionId}. 통화가 먼저 생성되어야 합니다.`
-        );
-        ws.close();
-        return sessionId;
-    }
-
-    // 기존 세션에 WebSocket 연결을 추가합니다.
-    session.twilioConn = ws;
-
-    ws.on('message', (data) => handleTwilioMessage(sessionId, data).catch(console.error));
-    ws.on('error', () => ws.close());
-    ws.on('close', () => closeAllConnections(sessionId)); // closeAllConnections는 status-callback에서 주로 호출됩니다.
-
-    console.log(`WebSocket 연결 완료 - CallSid: ${sessionId}`);
-    return sessionId;
-}
-
-// === 실시간 대화 처리  ===
-async function handleTwilioMessage(sessionId: string, data: RawData): Promise<void> {
-    const session = getSession(sessionId);
-    if (!session) return;
-
-    const msg = parseMessage(data);
-    if (!msg) return;
-
-    // media 이벤트가 아닌 경우만 로그 출력
-    if (msg.event !== 'media') {
-        console.log('Twilio 메시지:', msg.event, `(CallSid: ${session.callSid})`);
-    }
-
-    switch (msg.event) {
-        case 'start':
-            console.log(`통화 시작 (CallSid: ${session.callSid}), streamSid: ${msg.start.streamSid}`);
-            session.streamSid = msg.start.streamSid;
-            session.latestMediaTimestamp = 0;
-            session.lastAssistantItem = undefined;
-            session.responseStartTimestamp = undefined;
-
-            // OpenAI 연결 시도
-            connectToOpenAI(sessionId);
-            break;
-
-        case 'media':
-            session.latestMediaTimestamp = msg.media.timestamp;
-
-            const audioChunk = Buffer.from(msg.media.payload, 'base64');
-            
-            // 1. 전체 통화 녹음용 버퍼
-            session.audioBuffer.push(audioChunk); 
-
-            // 2. VAD 처리
-            const vadResult = await processAudioWithVAD(session, audioChunk, session.callSid);
-
-            if (vadResult.speechEnded && vadResult.utterance) {
-                console.log(`[STT] ${vadResult.utterance.length} bytes 전송 (CallSid: ${session.callSid})`);
-                
-                // TODO: STT 서비스로 전송
-            }
-
-            if (isOpen(session.modelConn)) {
-                jsonSend(session.modelConn, {
-                    type: 'input_audio_buffer.append',
-                    audio: msg.media.payload,
-                });
-            }
-            break;
-
-        case 'stop':
-        case 'close':
-            console.log(`통화 종료 신호 수신 (CallSid: ${session.callSid})`);
-            if (session.isSpeaking && session.vadAudioBuffer.length > 0) {
-                const finalUtterance = Buffer.concat(session.vadAudioBuffer);
-                console.log(`[STT] 마지막 ${finalUtterance.length} bytes의 음성 데이터를 STT 서비스로 전송합니다. (CallSid: ${session.callSid})`);
-                // sttService.process(finalUtterance);
-            }
-            closeAllConnections(sessionId);
-            break;
-    }
-}
-
-// === OpenAI 연결 함수 ===
-function connectToOpenAI(sessionId: string): void {
-    const session = getSession(sessionId);
-    if (!session || !session.twilioConn || !session.streamSid || !session.openAIApiKey) {
-        return;
-    }
-
-    if (isOpen(session.modelConn)) return; // 이미 연결됨
-
-    console.log(`OpenAI 연결 중... (CallSid: ${session.callSid})`);
-
-    session.modelConn = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview', {
-        headers: {
-            Authorization: `Bearer ${session.openAIApiKey}`,
-            'OpenAI-Beta': 'realtime=v1',
-        },
-    });
-
-    session.modelConn.on('open', () => {
-        console.log(`OpenAI 연결 완료 (CallSid: ${session.callSid})`);
-
-        // 세션 설정
-        const sessionConfig = {
-            type: 'session.update',
-            session: {
-                modalities: ['text', 'audio'],
-                turn_detection: {
-                    type: 'server_vad',
-                    threshold: 0.85,
-                    prefix_padding_ms: 1200,
-                    silence_duration_ms: 700,
-                },
-                voice: 'alloy',
-                input_audio_transcription: { model: 'whisper-1' },
-                input_audio_format: 'g711_ulaw',
-                output_audio_format: 'g711_ulaw',
-                input_audio_noise_reduction: { type: 'near_field' },
-            },
-        };
-
-        jsonSend(session.modelConn, sessionConfig);
-
-        // 프롬프트 전송
-        if (session.prompt) {
-            sendUserMessageToAI(sessionId, session.prompt);
-        }
-    });
-
-    session.modelConn.on('message', (data) => {
-        handleOpenAIMessage(sessionId, data);
-    });
-    session.modelConn.on('error', (error) => {
-        console.error(`OpenAI 연결 오류 (CallSid: ${session.callSid}):`, error);
-    });
-    session.modelConn.on('close', () => {
-        console.log(`OpenAI 연결 종료 (CallSid: ${session.callSid})`);
-    });
-}
-
-// === 사용자 메시지 전송 ===
-export function sendUserMessageToAI(sessionId: string, text: string): void {
-    const session = getSession(sessionId);
-    if (!session || !isOpen(session.modelConn)) return;
-
-    console.log(`사용자 (STT): ${text}`);
-    // TODO: STT 연결한 뒤에는 이쪽에서 push해야 할 것 같다
-    // session.conversationHistory.push({ is_elderly: true, conversation: text });
-
-    const userMessage = {
-        type: 'conversation.item.create',
-        item: {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text }],
-        },
-    };
-
-    jsonSend(session.modelConn, userMessage);
-    jsonSend(session.modelConn, { type: 'response.create' });
-}
-
-// === OpenAI 메시지 처리 ===
-function handleOpenAIMessage(sessionId: string, data: RawData): void {
-    const session = getSession(sessionId);
-    if (!session) return;
-
-    const event = parseMessage(data);
-    if (!event) return;
-
-    switch (event.type) {
-        case 'input_audio_buffer.speech_started':
-            // 사용자 말하기 시작 - AI 응답 중단
-            handleTruncation(sessionId);
-            break;
-
-        case 'response.audio.delta':
-            const t = Date.now();
-            // AI 음성 응답을 Twilio로 전달
-            if (session.twilioConn && session.streamSid) {
-                if (session.responseStartTimestamp === undefined) {
-                    session.responseStartTimestamp = session.latestMediaTimestamp || 0;
-                }
-                if (event.item_id) session.lastAssistantItem = event.item_id;
-
-                const aiAudioChunk = Buffer.from(event.delta, 'base64');
-                session.audioBuffer.push(aiAudioChunk);
-
-                jsonSend(session.twilioConn, {
-                    event: 'media',
-                    streamSid: session.streamSid,
-                    media: { payload: event.delta },
-                });
-
-                jsonSend(session.twilioConn, {
-                    event: 'mark',
-                    streamSid: session.streamSid,
-                });
-            }
-            break;
-
-        case 'response.output_item.done':
-            // AI 응답 완료 - 텍스트 저장
-            const { item } = event;
-
-            if (item.type === 'message' && item.role === 'assistant') {
-                const content = item.content;
-
-                if (content && Array.isArray(content)) {
-                    for (const contentItem of content) {
-                        let aiResponse = null;
-                        if (contentItem.type === 'text' && contentItem.text) {
-                            aiResponse = contentItem.text;
-                        } else if (contentItem.type === 'audio' && contentItem.transcript) {
-                            aiResponse = contentItem.transcript;
-                        }
-
-                        if (aiResponse) {
-                            console.log(`AI:`, aiResponse);
-                            session.conversationHistory.push({
-                                is_elderly: false,
-                                conversation: aiResponse,
-                            });
-                        }
-                    }
-                }
-            }
-            break;
-
-        case 'conversation.item.input_audio_transcription.completed':
-            const ts = Date.now();
-            console.log(`[[STT] 인식 완료] ${ts}:`);
-            // 사용자 음성 인식 완료 - 텍스트 저장
-            if (event.transcript) {
-                console.log(`사용자:`, event.transcript);
-                session.conversationHistory.push({
-                    is_elderly: true,
-                    conversation: event.transcript,
-                });
-            }
-            break;
-    }
-}
-
-// === 응답 중단 처리 ===
-function handleTruncation(sessionId: string): void {
-    const session = getSession(sessionId);
-    if (!session || !session.lastAssistantItem || session.responseStartTimestamp === undefined) {
-        return;
-    }
-
-    const elapsedMs = (session.latestMediaTimestamp || 0) - (session.responseStartTimestamp || 0);
-    const audio_end_ms = elapsedMs > 0 ? elapsedMs : 0;
-
-    // OpenAI에 중단 명령
-    if (isOpen(session.modelConn)) {
-        jsonSend(session.modelConn, {
-            type: 'conversation.item.truncate',
-            item_id: session.lastAssistantItem,
-            content_index: 0,
-            audio_end_ms,
-        });
-    }
-
-    // Twilio 스트림 클리어
-    if (session.twilioConn && session.streamSid) {
-        jsonSend(session.twilioConn, {
-            event: 'clear',
-            streamSid: session.streamSid,
-        });
-    }
-
-    session.lastAssistantItem = undefined;
-    session.responseStartTimestamp = undefined;
 }
 
 function mapTwilioStatusToDtoStatus(twilioStatus?: string): string {
@@ -576,24 +302,6 @@ async function uploadAudioToS3(sessionId: string, audioChunks: Buffer[]): Promis
     }
 }
 
-// === 유틸리티 함수들 ===
-function parseMessage(data: RawData): any {
-    try {
-        return JSON.parse(data.toString());
-    } catch {
-        return null;
-    }
-}
-
-function jsonSend(ws: WebSocket | undefined, obj: unknown): void {
-    if (!isOpen(ws)) return;
-    ws.send(JSON.stringify(obj));
-}
-
-function isOpen(ws?: WebSocket): ws is WebSocket {
-    return !!ws && ws.readyState === WebSocket.OPEN;
-}
-
 // === 상태 조회 함수들 ===
 export function getSessionStatus(sessionId: string) {
     const session = getSession(sessionId);
@@ -607,7 +315,9 @@ export function getSessionStatus(sessionId: string) {
         callSid: session.callSid,
         elderId: session.elderId,
         conversationCount: session.conversationHistory.length,
-        isActive: isOpen(session.twilioConn) && isOpen(session.modelConn),
+        isActive: session.pipeline === 'modular'
+            ? isOpen(session.twilioConn)
+            : isOpen(session.twilioConn) && isOpen(session.modelConn),
     };
 }
 
@@ -619,7 +329,9 @@ export function getAllActiveSessions() {
             callSid: session.callSid,
             elderId: session.elderId,
             conversationCount: session.conversationHistory.length,
-            isActive: isOpen(session.twilioConn) && isOpen(session.modelConn),
+            isActive: session.pipeline === 'modular'
+                ? isOpen(session.twilioConn)
+                : isOpen(session.twilioConn) && isOpen(session.modelConn),
         })),
     };
 }

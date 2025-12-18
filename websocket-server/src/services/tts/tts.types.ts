@@ -27,5 +27,6 @@ export interface TTSStreamResult {
     totalChunks: number;
     totalBytes: number;
     durationMs?: number;
+    firstChunkTimestamp?: number;
     error?: string;
 }

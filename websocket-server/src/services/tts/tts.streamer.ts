@@ -9,9 +9,19 @@ import { AudioUtils } from '../../utils/audio.utils';
  */
 export class TTSStreamer {
     private ttsService: TTSService;
+    private currentAbortController?: AbortController;
 
     constructor(ttsService: TTSService) {
         this.ttsService = ttsService;
+    }
+
+    // 현재 진행 중인 스트리밍을 중단
+    abortCurrentStream(): void {
+        if (this.currentAbortController) {
+            this.currentAbortController.abort();
+            this.currentAbortController = undefined;
+            logger.info('현재 진행 중인 TTS 스트리밍을 중단했습니다');
+        }
     }
 
     /**
@@ -23,12 +33,26 @@ export class TTSStreamer {
     async streamTextToTwilio(text: string, options: TwilioStreamOptions): Promise<TTSStreamResult> {
         const startTime = Date.now();
 
+        this.currentAbortController = new AbortController();
+        const signal = this.currentAbortController.signal;
+
         try {
             // 1. TTS로 ulaw 오디오 생성
             const ulawAudio = await this.ttsService.synthesizeSpeechToUlaw(text);
 
+            // 중단 확인 (streamAudioToTwilio에서도 청크 발송 시 확인하지만, 빠른 중지를 위해서 추가)
+            if (signal.aborted) {
+                logger.info('TTS 스트리밍이 중단되었습니다. (오디오 생성 후)');
+                return {
+                    success: false,
+                    totalChunks: 0,
+                    totalBytes: 0,
+                    error: 'Aborted',
+                };
+            }
+
             // 2. Twilio로 스트리밍
-            const result = await this.streamAudioToTwilio(ulawAudio, options);
+            const result = await this.streamAudioToTwilio(ulawAudio, options, signal);
 
             return {
                 ...result,
@@ -42,6 +66,9 @@ export class TTSStreamer {
                 totalBytes: 0,
                 error: String(error),
             };
+        } finally {
+            // 스트리밍 완료 후 AbortController 정리
+            this.currentAbortController = undefined;
         }
     }
 
@@ -49,9 +76,14 @@ export class TTSStreamer {
      * 오디오 버퍼를 Twilio로 스트리밍
      * @param ulawAudio ulaw 형식 오디오 버퍼
      * @param options Twilio 스트림 옵션
+     * @param signal 중단 신호
      * @returns 스트리밍 결과
      */
-    async streamAudioToTwilio(ulawAudio: Buffer, options: TwilioStreamOptions): Promise<TTSStreamResult> {
+    async streamAudioToTwilio(
+        ulawAudio: Buffer,
+        options: TwilioStreamOptions,
+        signal?: AbortSignal
+    ): Promise<TTSStreamResult> {
         const { streamSid, twilioConn, chunkSize = 160, chunkIntervalMs = 20 } = options;
 
         if (!this.isWebSocketOpen(twilioConn)) {
@@ -69,10 +101,22 @@ export class TTSStreamer {
         logger.info(`Twilio로 스트리밍 시작: ${chunks.length} 청크, ${ulawAudio.length} bytes`);
 
         let sentChunks = 0;
+        let firstChunkTimestamp: number | undefined;
         const startTime = Date.now();
 
         // 청크를 순차적으로 전송 (절대 시간 기준)
         for (let i = 0; i < chunks.length; i++) {
+            // 중단 확인
+            if (signal?.aborted) {
+                logger.info(`TTS 스트리밍이 중단되었습니다. ${sentChunks}/${chunks.length} 청크 전송됨`);
+                return {
+                    success: false,
+                    totalChunks: sentChunks,
+                    totalBytes: sentChunks * chunkSize,
+                    error: 'Aborted',
+                };
+            }
+
             const chunk = chunks[i];
 
             if (!this.isWebSocketOpen(twilioConn)) {
@@ -94,6 +138,11 @@ export class TTSStreamer {
 
             this.sendToTwilio(twilioConn, mediaEvent);
             sentChunks++;
+
+            // 레이턴시 측정을 위해 첫 청크 전송 시점 기록
+            if (sentChunks === 1) {
+                firstChunkTimestamp = Date.now();
+            }
 
             // 마크 이벤트 전송 -> Twilio 측에서 음성 발송이 끝났다는 응답을 가능하게 함
             if (sentChunks % 10 === 0) {
@@ -127,6 +176,7 @@ export class TTSStreamer {
             success: sentChunks === chunks.length,
             totalChunks: sentChunks,
             totalBytes: ulawAudio.length,
+            firstChunkTimestamp,
         };
     }
 

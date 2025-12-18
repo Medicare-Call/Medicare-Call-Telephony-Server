@@ -50,17 +50,45 @@ export class LLMService {
 
         try {
             const response = await this.model.invoke(messages);
-            
+
             if (typeof response.content === 'string') {
                 return response.content;
             } else {
                 // 필요한 경우 복합 콘텐츠 유형 처리, 현재는 결합
-                return Array.isArray(response.content) 
+                return Array.isArray(response.content)
                     ? response.content.map(c => (typeof c === 'string' ? c : JSON.stringify(c))).join(' ')
                     : JSON.stringify(response.content);
             }
         } catch (error) {
             console.error("LLM 응답 생성 중 오류 발생:", error);
+            throw error;
+        }
+    }
+
+    /**
+     * 초기 인사말 생성 (시스템 프롬프트 기반, 사용자 입력 없이)
+     * 통화 시작 시 AI가 먼저 말을 걸도록 하는 용도
+     * @param systemPrompt 시스템 프롬프트 (역할 및 지시사항)
+     * @returns AI의 초기 인사말
+     */
+    async generateInitialGreeting(systemPrompt: string): Promise<string> {
+        const messages: BaseMessage[] = [
+            new SystemMessage(systemPrompt),
+            new HumanMessage(''), // 빈 메시지로 응답 촉발
+        ];
+
+        try {
+            const response = await this.model.invoke(messages);
+
+            if (typeof response.content === 'string') {
+                return response.content;
+            } else {
+                return Array.isArray(response.content)
+                    ? response.content.map(c => (typeof c === 'string' ? c : JSON.stringify(c))).join(' ')
+                    : JSON.stringify(response.content);
+            }
+        } catch (error) {
+            console.error("초기 인사말 생성 중 오류 발생:", error);
             throw error;
         }
     }
