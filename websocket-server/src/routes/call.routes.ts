@@ -3,8 +3,8 @@ import { getTwiml, runCall, statusCallback, getMetrics } from '../controllers/ca
 
 const router = express.Router();
 
-router.post('/twiml', getTwiml);
-router.post('/run', runCall);
+router.post('/twiml/:pipeline', getTwiml);
+router.post('/run/:pipeline', runCall);
 router.post('/status-callback', statusCallback);
 router.get('/metrics', getMetrics);
 

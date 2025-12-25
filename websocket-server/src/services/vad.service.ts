@@ -29,13 +29,14 @@ function ulawToPcm16(ulawAudio: Buffer): Buffer {
     return pcm16;
 }
 
-const vad = new VAD(VAD.Mode.LOW_BITRATE);
+const vad = new VAD(VAD.Mode.VERY_AGGRESSIVE);
 const SILENCE_THRESHOLD = 800; // 800ms 이상 침묵이 지속되면 발화 종료로 간주
 
 // VAD 상태를 직접 관리하기 위한 인터페이스
 export interface VadState {
     isSpeaking: boolean;
     vadAudioBuffer: Buffer[];
+    speechStartTimestamp: number;
     lastVoiceTimestamp: number;
 }
 
@@ -55,8 +56,9 @@ export async function processAudioWithVAD(
 
     if (vadEvent === VAD.Event.VOICE) {
         if (!vadState.isSpeaking) {
-            console.log(`[VAD] Speech started. (CallSid: ${callSid})`);
+            console.log(`[VAD] Speech STARTED (CallSid: ${callSid})`);
             vadState.isSpeaking = true;
+            vadState.speechStartTimestamp = now; // 발화 시작 시간 기록
             vadState.vadAudioBuffer = []; // 버퍼 초기화
         }
         vadState.lastVoiceTimestamp = now;
@@ -67,13 +69,14 @@ export async function processAudioWithVAD(
             const silenceDuration = now - (vadState.lastVoiceTimestamp || now);
 
             if (silenceDuration > SILENCE_THRESHOLD) {
-                console.log(`[VAD] Speech ended detected (Silence: ${silenceDuration}ms).`);
+                console.log(`[VAD] Speech ENDED (silence: ${silenceDuration}ms, CallSid: ${callSid})`);
                 vadState.isSpeaking = false;
+                vadState.speechStartTimestamp = 0; // 발화 시작 시간 초기화
 
                 if (vadState.vadAudioBuffer.length > 0) {
                     const completeUtterance = Buffer.concat(vadState.vadAudioBuffer);
                     vadState.vadAudioBuffer = []; // 버퍼 초기화
-                    
+
                     // QA를 위한 발화 저장
                     // await saveUtteranceForQA(callSid, [completeUtterance]);
 
