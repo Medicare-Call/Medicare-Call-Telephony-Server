@@ -32,6 +32,9 @@ export interface Session extends VadState {
     // Modular Pipeline 전용
     transcriptBuffer?: string[]; // STT final 결과를 누적, VAD speechEnded 시 LLM에 전달
     isTTSPlaying?: boolean; // TTS 재생 중 여부
+    ttsQueue?: string[]; // TTS 대기 문장 큐 (스트리밍 LLM 응답용)
+    isTTSQueueProcessing?: boolean; // TTS 큐 처리 중 플래그
+    pendingLLMResponse?: string; // LLM 스트리밍 완료 후 TTS 완료 대기 중인 응답
 }
 
 let sessions: Map<string, Session> = new Map();

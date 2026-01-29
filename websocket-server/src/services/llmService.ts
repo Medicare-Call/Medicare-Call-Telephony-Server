@@ -6,6 +6,13 @@ export interface ChatMessage {
     content: string;
 }
 
+export interface StreamCallbacks {
+    onFirstToken?: () => void;
+    onSentence: (sentence: string) => Promise<void>;
+    onComplete?: (fullResponse: string) => void;
+    onError?: (error: Error) => void;
+}
+
 export class LLMService {
     private model: ChatOpenAI;
 
@@ -89,6 +96,103 @@ export class LLMService {
             }
         } catch (error) {
             console.error("초기 인사말 생성 중 오류 발생:", error);
+            throw error;
+        }
+    }
+
+    /**
+     * 스트리밍 방식으로 LLM 응답을 생성하고 문장 단위로 콜백 호출
+     * @param systemPrompt 컨텍스트를 설정하기 위한 시스템 프롬프트
+     * @param userMessage 현재 사용자 메시지
+     * @param callbacks 문장 완성 시 호출될 콜백들
+     * @param history 선택적 대화 기록
+     */
+    async streamResponse(
+        systemPrompt: string,
+        userMessage: string,
+        callbacks: StreamCallbacks,
+        history: ChatMessage[] = []
+    ): Promise<void> {
+        const messages: BaseMessage[] = [];
+
+        // 시스템 프롬프트 및 대화 기록추가
+        messages.push(new SystemMessage(systemPrompt));
+
+        for (const msg of history) {
+            if (msg.role === 'user') {
+                messages.push(new HumanMessage(msg.content));
+            } else if (msg.role === 'assistant') {
+                messages.push(new AIMessage(msg.content));
+            } else if (msg.role === 'system') {
+                messages.push(new SystemMessage(msg.content));
+            }
+        }
+
+        // 현재 사용자 메시지 추가
+        messages.push(new HumanMessage(userMessage));
+
+        let buffer = '';
+        let fullResponse = '';
+        let isFirstToken = true;
+        // 문장 종료를 판단하는 부호 패턴
+        const sentenceEndingPattern = /[.!?\n]/;
+
+        try {
+            const stream = await this.model.stream(messages);
+
+            for await (const chunk of stream) {
+                const content = typeof chunk.content === 'string'
+                    ? chunk.content
+                    : '';
+
+                if (!content) continue;
+
+                if (isFirstToken) {
+                    isFirstToken = false;
+                    if (callbacks.onFirstToken) {
+                        callbacks.onFirstToken();
+                    }
+                }
+
+                buffer += content;
+                fullResponse += content;
+
+                // 버퍼에서 마지막 문장 종료 위치 탐색
+                let lastSentenceEnd = -1;
+                for (let i = 0; i < buffer.length; i++) {
+                    if (sentenceEndingPattern.test(buffer[i])) {
+                        // 종료 부호 뒤에 공백이 있거나 마지막 문자인 경우 문장 완성으로 간주
+                        if (i === buffer.length - 1 || buffer[i + 1] === ' ' || buffer[i] === '\n') {
+                            lastSentenceEnd = i;
+                        }
+                    }
+                }
+
+                // 완성된 문장을 콜백으로 전달
+                if (lastSentenceEnd >= 0) {
+                    const completedText = buffer.substring(0, lastSentenceEnd + 1).trim();
+                    if (completedText) {
+                        await callbacks.onSentence(completedText);
+                    }
+                    // 미완성 문장은 버퍼에 유지
+                    buffer = buffer.substring(lastSentenceEnd + 1).trim();
+                }
+            }
+
+            // 스트림 종료 후 남은 버퍼 처리
+            if (buffer.trim()) {
+                await callbacks.onSentence(buffer.trim());
+            }
+
+            if (callbacks.onComplete) {
+                callbacks.onComplete(fullResponse.trim());
+            }
+
+        } catch (error) {
+            console.error("LLM 스트리밍 응답 생성 중 오류 발생:", error);
+            if (callbacks.onError) {
+                callbacks.onError(error as Error);
+            }
             throw error;
         }
     }
