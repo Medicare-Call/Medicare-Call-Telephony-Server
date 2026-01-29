@@ -1,5 +1,6 @@
 import VAD from 'node-vad';
 import { saveUtteranceForQA } from '../utils/test-vad';
+import logger from '../config/logger';
 
 // µ-law to 16-bit PCM 변환 함수
 // 매번 실시간으로 음성 데이터 형식을 변환하게 되면 연산비용이 커서 Lookup 테이블을 사용하여 CPU-Bound 작업을 줄입니다.
@@ -56,7 +57,7 @@ export async function processAudioWithVAD(
 
     if (vadEvent === VAD.Event.VOICE) {
         if (!vadState.isSpeaking) {
-            console.log(`[VAD] Speech STARTED (CallSid: ${callSid})`);
+            logger.info(`[VAD] Speech STARTED (CallSid: ${callSid})`);
             vadState.isSpeaking = true;
             vadState.speechStartTimestamp = now; // 발화 시작 시간 기록
             vadState.vadAudioBuffer = []; // 버퍼 초기화
@@ -69,7 +70,7 @@ export async function processAudioWithVAD(
             const silenceDuration = now - (vadState.lastVoiceTimestamp || now);
 
             if (silenceDuration > SILENCE_THRESHOLD) {
-                console.log(`[VAD] Speech ENDED (silence: ${silenceDuration}ms, CallSid: ${callSid})`);
+                logger.info(`[VAD] Speech ENDED (silence: ${silenceDuration}ms, CallSid: ${callSid})`);
                 vadState.isSpeaking = false;
                 vadState.speechStartTimestamp = 0; // 발화 시작 시간 초기화
 
