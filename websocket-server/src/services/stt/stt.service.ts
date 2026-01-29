@@ -145,7 +145,7 @@ export class STTService {
                         callbacks.onTranscript(text, isFinal);
 
                         if (isFinal) {
-                            logger.info(`[STT] 최종 결과 (seq: ${response.seq}): ${text}`);
+                            logger.debug(`[STT] 최종 결과 (seq: ${response.seq}): ${text}`);
                         } else {
                             logger.debug(`[STT] 중간 결과 (seq: ${response.seq}): ${text}`);
                         }

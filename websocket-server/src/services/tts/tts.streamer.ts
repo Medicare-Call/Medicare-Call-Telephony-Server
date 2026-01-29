@@ -98,7 +98,7 @@ export class TTSStreamer {
 
         // 청크로 분할
         const chunks = AudioUtils.splitIntoChunks(ulawAudio, chunkSize);
-        logger.info(`Twilio로 스트리밍 시작: ${chunks.length} 청크, ${ulawAudio.length} bytes`);
+        logger.debug(`Twilio로 스트리밍 시작: ${chunks.length} 청크, ${ulawAudio.length} bytes`);
 
         let sentChunks = 0;
         let firstChunkTimestamp: number | undefined;
@@ -170,7 +170,7 @@ export class TTSStreamer {
             }
         }
 
-        logger.info(`Twilio 스트리밍 완료: ${sentChunks}/${chunks.length} 청크 전송`);
+        logger.debug(`Twilio 스트리밍 완료: ${sentChunks}/${chunks.length} 청크 전송`);
 
         return {
             success: sentChunks === chunks.length,
