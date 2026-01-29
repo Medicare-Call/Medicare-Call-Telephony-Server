@@ -9,7 +9,7 @@ export interface ChatMessage {
 export class LLMService {
     private model: ChatOpenAI;
 
-    constructor(apiKey: string, modelName: string = "gpt-4o-mini", temperature: number = 0.7) {
+    constructor(apiKey: string, modelName: string = "ft:gpt-4.1-mini-2025-04-14:medicare:medi-call:Cf9WIPWD", temperature: number = 0.7) {
         this.model = new ChatOpenAI({
             openAIApiKey: apiKey,
             modelName: modelName,
