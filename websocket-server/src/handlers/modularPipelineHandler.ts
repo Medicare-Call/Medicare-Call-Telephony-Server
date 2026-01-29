@@ -316,6 +316,11 @@ async function sendTTSResponse(sessionId: string, text: string, vadEndTimestamp?
         });
 
         if (result.success) {
+            // End-to-End Latency 로깅 (VAD 발화 종료 -> 첫 TTS 청크 전송)
+            if (vadEndTimestamp && result.firstChunkTimestamp) {
+                const endToEndLatency = result.firstChunkTimestamp - vadEndTimestamp;
+                logger.info(`[Modular Pipeline] End-to-End Latency: ${endToEndLatency}ms (CallSid: ${session.callSid})`);
+            }
             logger.info(
                 `[Modular Pipeline] TTS 완료 (${result.durationMs}ms, ${result.totalChunks} chunks, ${result.totalBytes} bytes, CallSid: ${session.callSid})`
             );
