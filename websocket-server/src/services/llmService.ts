@@ -9,13 +9,12 @@ export interface ChatMessage {
 export class LLMService {
     private model: ChatOpenAI;
 
-    constructor(apiKey: string, modelName: string = "gpt-5-nano", temperature: number = 0.7) {
-        // GPT-5 models use reasoning effort instead of temperature (unless effort is "none")
+    constructor(apiKey: string, modelName: string = "gpt-4o-mini", temperature: number = 0.7) {
         this.model = new ChatOpenAI({
             openAIApiKey: apiKey,
             modelName: modelName,
-            reasoning: { effort: "low" },
-        } as any);
+            temperature: temperature,
+        });
     }
 
     /**
