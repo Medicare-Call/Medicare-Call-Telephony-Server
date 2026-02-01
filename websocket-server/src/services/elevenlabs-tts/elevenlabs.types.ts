@@ -1,17 +1,27 @@
 import { WebSocket } from 'ws';
 
 /**
+ * ElevenLabs TTS 콜백
+ */
+export interface ElevenLabsCallbacks {
+    onAudioSentToTwilio?: (timestamp: number) => void;  // Twilio에 오디오 전송 시
+    onStreamComplete?: () => void;                      // isFinal 수신 또는 연결 종료 시
+}
+
+/**
  * ElevenLabs WebSocket 세션 (통화당 1개)
  */
 export interface ElevenLabsSession {
     ws: WebSocket;
     isActive: boolean;
+    isMuted: boolean;
     twilioConn: WebSocket;
     streamSid: string;
     buffer: Buffer;
     totalChunks: number;
     totalBytes: number;
     firstChunkTimestamp?: number;
+    callbacks?: ElevenLabsCallbacks; 
 }
 
 /**

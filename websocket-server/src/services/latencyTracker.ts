@@ -4,7 +4,6 @@ interface PipelineTimestamps {
     VADEnd?: number;
     LLMCall?: number;
     LLMFirstToken?: number;
-    LLMFirstSentence?: number;
     TTSFirstChunk?: number;
 }
 
@@ -47,18 +46,6 @@ class LatencyTracker {
         }
     }
 
-    recordLLMFirstSentence(sessionId: string, callSid: string): void {
-        if (!this.enabled) return;
-        const timings = this.sessions.get(sessionId);
-        if (!timings || timings.LLMFirstSentence) return;
-
-        timings.LLMFirstSentence = Date.now();
-
-        if (timings.LLMFirstToken) {
-            logger.info(`[Latency] LLM 첫 토큰 응답 -> 첫 문장 생성: ${timings.LLMFirstSentence - timings.LLMFirstToken}ms (CallSid: ${callSid})`);
-        }
-    }
-
     recordTTSFirstChunk(sessionId: string, callSid: string, timestamp: number): void {
         if (!this.enabled) return;
         const timings = this.sessions.get(sessionId);
@@ -66,8 +53,8 @@ class LatencyTracker {
 
         timings.TTSFirstChunk = timestamp;
 
-        if (timings.LLMFirstSentence) {
-            logger.info(`[Latency] LLM 첫 문장 생성 -> TTS 청크 최초 발송: ${timestamp - timings.LLMFirstSentence}ms (CallSid: ${callSid})`);
+        if (timings.LLMFirstToken) {
+            logger.info(`[Latency] LLM 첫 토큰 응답 -> TTS 첫 청크 발송: ${timestamp - timings.LLMFirstToken}ms (CallSid: ${callSid})`);
         }
 
         if (timings.VADEnd) {
