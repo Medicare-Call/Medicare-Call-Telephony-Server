@@ -129,12 +129,8 @@ async function handleStreamStart(sessionId: string, msg: TwilioMessage): Promise
     }
 
     // 초기 인사말 생성 및 TTS 처리
-    const systemPrompt = session.prompt || '당신은 친절한 AI 어시스턴트입니다. 사용자의 질문에 간결하고 명확하게 답변해주세요.';
-    const greeting = await llmService.generateInitialGreeting(systemPrompt);
-
-    logger.info(`[Modular Pipeline] 초기 인사말 생성 완료 (CallSid: ${session.callSid}): "${greeting.substring(0, 50)}..."`);
-
-    await sendAIResponse(sessionId, greeting);
+    latencyTracker.start(sessionId);
+    await processLLMResponse(sessionId, '');
 }
 
 async function handleMediaMessage(sessionId: string, msg: TwilioMessage): Promise<void> {

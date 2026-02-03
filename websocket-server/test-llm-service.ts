@@ -21,11 +21,14 @@ async function main() {
     ];
 
     console.log("Sending request to LLM...");
+    console.log("\n--- Response from LLM ---");
+
     try {
-        const response = await llmService.generateResponse(systemPrompt, userMessage, history);
-        console.log("\n--- Response from LLM ---");
-        console.log(response);
-        console.log("-------------------------\n");
+        await llmService.streamResponse(systemPrompt, userMessage, {
+            onToken: (token) => process.stdout.write(token),
+            onComplete: () => console.log("\n-------------------------\n"),
+            onError: (error) => console.error("Stream error:", error),
+        }, history);
     } catch (error) {
         console.error("Failed to generate response:", error);
     }
