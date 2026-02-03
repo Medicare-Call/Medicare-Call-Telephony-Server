@@ -5,9 +5,10 @@ import { TwilioMessage } from '../types/twilio.types';
 import { parseMessage } from '../utils/websocket.utils';
 import { processAudioWithVAD } from '../services/vad.service';
 import { sttService, STTCallbacks } from '../services/stt';
-import { LLMService } from '../services/llmService';
+import { LLMService, StreamCallbacks } from '../services/llmService';
 import { OPENAI_API_KEY } from '../config/env';
 import { ttsStreamer } from '../services/tts';
+import { latencyTracker } from '../services/latencyTracker';
 
 // LLM 서비스 인스턴스
 const llmService = new LLMService(OPENAI_API_KEY);
@@ -182,8 +183,8 @@ async function handleMediaMessage(sessionId: string, msg: TwilioMessage): Promis
 
     // 5. 발화가 끝났을 때 버퍼의 모든 transcript를 LLM에 전달
     if (vadResult.speechEnded) {
-        // 레이턴시 측정: VAD 발화 종료 시점을 로컬 변수로 저장 (세션에 저장 시 다음 발화에 의해 덮어씌워짐)
-        const vadEndTimestamp = Date.now();
+        latencyTracker.start(sessionId);
+        latencyTracker.recordVADEnd(sessionId);
         logger.debug(`[Modular Pipeline] 발화 종료 감지 (CallSid: ${session.callSid})`);
 
         // 버퍼에 transcript가 있으면 LLM 처리
@@ -196,8 +197,8 @@ async function handleMediaMessage(sessionId: string, msg: TwilioMessage): Promis
             // 버퍼 초기화
             session.transcriptBuffer = [];
 
-            // LLM 처리 - VAD 종료 시점을 파라미터로 함께 전달
-            handleFinalTranscript(sessionId, fullTranscript, vadEndTimestamp).catch(logger.error);
+            // LLM 처리
+            handleFinalTranscript(sessionId, fullTranscript).catch(logger.error);
         } else {
             logger.debug(`[Modular Pipeline] 발화 종료되었으나 transcript 버퍼가 비어있음 (CallSid: ${session.callSid})`);
         }
@@ -221,7 +222,7 @@ async function handleStreamStop(sessionId: string): Promise<void> {
     closeAllConnections(sessionId);
 }
 
-async function handleFinalTranscript(sessionId: string, transcript: string, vadEndTimestamp: number): Promise<void> {
+async function handleFinalTranscript(sessionId: string, transcript: string): Promise<void> {
     const session = getSession(sessionId);
     if (!session) return;
 
@@ -236,18 +237,15 @@ async function handleFinalTranscript(sessionId: string, transcript: string, vadE
         conversation: transcript,
     });
 
-    // LLM 처리 - VAD 종료 시점 전달
-    await processLLMResponse(sessionId, transcript, vadEndTimestamp);
+    // LLM 처리
+    await processLLMResponse(sessionId, transcript);
 }
 
-async function processLLMResponse(sessionId: string, userMessage: string, vadEndTimestamp: number): Promise<void> {
+async function processLLMResponse(sessionId: string, userMessage: string): Promise<void> {
     const session = getSession(sessionId);
     if (!session) return;
 
     try {
-        logger.debug(`[Modular Pipeline] LLM 처리 시작 (CallSid: ${session.callSid})`);
-        const startTime = Date.now();
-
         // session에 저장된 시스템 프롬프트 항상 첨부
         const systemPrompt = session.prompt ||
             '당신은 친절한 AI 어시스턴트입니다. 사용자의 질문에 간결하고 명확하게 답변해주세요.';
@@ -258,25 +256,40 @@ async function processLLMResponse(sessionId: string, userMessage: string, vadEnd
             content: msg.conversation,
         }));
 
-        // LLM 응답 생성
-        const llmResponse = await llmService.generateResponse(systemPrompt, userMessage, history);
+        // TTS 큐 초기화
+        session.ttsQueue = [];
+        session.isTTSQueueProcessing = false;
 
-        const llmLatency = Date.now() - startTime;
-        logger.info(`[Modular Pipeline] LLM 완료 (${llmLatency}ms, CallSid: ${session.callSid}): "${llmResponse.substring(0, 100)}..."`);
+        latencyTracker.recordLLMCall(sessionId, session.callSid);
 
-        // TTS 처리 - VAD 종료 시점 전달
-        const ttsResult = await sendTTSResponse(sessionId, llmResponse, vadEndTimestamp);
+        // 스트리밍 콜백 설정
+        const callbacks: StreamCallbacks = {
+            onFirstToken: () => {
+                latencyTracker.recordLLMFirstToken(sessionId, session.callSid);
+            },
+            onSentence: async (sentence: string) => {
+                latencyTracker.recordLLMFirstSentence(sessionId, session.callSid);
 
-        // TTS가 성공적으로 완료되었을 때만 대화 히스토리에 추가
-        if (ttsResult && ttsResult.success) {
-            session.conversationHistory.push({
-                is_elderly: false,
-                conversation: llmResponse,
-            });
-            logger.info(`[Modular Pipeline] AI 응답을 히스토리에 저장 (CallSid: ${session.callSid})`);
-        } else {
-            logger.warn(`[Modular Pipeline] TTS 중단됨 - 히스토리에 저장하지 않음 (CallSid: ${session.callSid})`);
-        }
+                // 문장을 큐에 추가
+                session.ttsQueue!.push(sentence);
+
+                // 큐 처리가 진행 중이 아니면 시작
+                if (!session.isTTSQueueProcessing) {
+                    processTTSQueue(sessionId).catch(logger.error);
+                }
+            },
+            onComplete: (fullResponse: string) => {
+                // 전체 응답을 임시 저장 (TTS 완료 후 히스토리에 추가)
+                session.pendingLLMResponse = fullResponse;
+            },
+            onError: (error: Error) => {
+                logger.error(`[Modular Pipeline] LLM 스트리밍 에러 (CallSid: ${session.callSid}):`, error);
+            }
+        };
+
+        // LLM 스트리밍 시작
+        await llmService.streamResponse(systemPrompt, userMessage, callbacks, history);
+
     } catch (err) {
         logger.error(`[Modular Pipeline] LLM 처리 실패 (CallSid: ${session.callSid}):`, err);
         // 오류 발생 시 기본 응답
@@ -284,7 +297,52 @@ async function processLLMResponse(sessionId: string, userMessage: string, vadEnd
     }
 }
 
-async function sendTTSResponse(sessionId: string, text: string, vadEndTimestamp?: number): Promise<{ success: boolean } | undefined> {
+// TTS 큐를 순차적으로 처리하는 메소드
+async function processTTSQueue(sessionId: string): Promise<void> {
+    const session = getSession(sessionId);
+    if (!session) return;
+
+    // 이미 처리 중이면 리턴
+    if (session.isTTSQueueProcessing) return;
+
+    session.isTTSQueueProcessing = true;
+
+    try {
+        while (session.ttsQueue!.length > 0) {
+            const sentence = session.ttsQueue!.shift()!;
+
+            logger.debug(`[Modular Pipeline] TTS 큐 처리 중 (남은 문장: ${session.ttsQueue!.length}, CallSid: ${session.callSid}): "${sentence.substring(0, 50)}..."`);
+
+            const ttsResult = await sendTTSResponse(sessionId, sentence);
+
+            if (ttsResult?.firstChunkTimestamp) {
+                latencyTracker.recordTTSFirstChunk(sessionId, session.callSid, ttsResult.firstChunkTimestamp);
+            }
+
+            // TTS 실패 시 큐 처리 중단
+            if (!ttsResult || !ttsResult.success) {
+                logger.warn(`[Modular Pipeline] TTS 실패 또는 중단 - 큐 처리 중단 (CallSid: ${session.callSid})`);
+                break;
+            }
+        }
+    } finally {
+        session.isTTSQueueProcessing = false;
+
+        // pendingLLMResponse가 있고 큐가 비었으면 히스토리에 저장
+        if (session.pendingLLMResponse && session.ttsQueue!.length === 0) {
+            session.conversationHistory.push({
+                is_elderly: false,
+                conversation: session.pendingLLMResponse,
+            });
+            logger.info(`[Modular Pipeline] AI 응답을 히스토리에 저장 (CallSid: ${session.callSid})`);
+            session.pendingLLMResponse = undefined;
+        }
+
+        latencyTracker.clear(sessionId);
+    }
+}
+
+async function sendTTSResponse(sessionId: string, text: string): Promise<{ success: boolean; firstChunkTimestamp?: number } | undefined> {
     const session = getSession(sessionId);
     if (!session || !session.twilioConn || !session.streamSid) return undefined;
 
@@ -316,11 +374,6 @@ async function sendTTSResponse(sessionId: string, text: string, vadEndTimestamp?
         });
 
         if (result.success) {
-            // End-to-End Latency 로깅 (VAD 발화 종료 -> 첫 TTS 청크 전송)
-            if (vadEndTimestamp && result.firstChunkTimestamp) {
-                const endToEndLatency = result.firstChunkTimestamp - vadEndTimestamp;
-                logger.info(`[Modular Pipeline] End-to-End Latency: ${endToEndLatency}ms (CallSid: ${session.callSid})`);
-            }
             logger.info(
                 `[Modular Pipeline] TTS 완료 (${result.durationMs}ms, ${result.totalChunks} chunks, ${result.totalBytes} bytes, CallSid: ${session.callSid})`
             );
@@ -328,7 +381,10 @@ async function sendTTSResponse(sessionId: string, text: string, vadEndTimestamp?
             logger.error(`[Modular Pipeline] TTS 스트리밍 실패 (CallSid: ${session.callSid}): ${result.error}`);
         }
 
-        return result;
+        return {
+            success: result.success,
+            firstChunkTimestamp: result.firstChunkTimestamp,
+        };
     } catch (err) {
         logger.error(`[Modular Pipeline] TTS 처리 실패 (CallSid: ${session.callSid}):`, err);
         return { success: false };
