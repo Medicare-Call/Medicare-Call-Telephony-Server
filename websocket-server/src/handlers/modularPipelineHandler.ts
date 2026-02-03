@@ -184,7 +184,7 @@ async function handleMediaMessage(sessionId: string, msg: TwilioMessage): Promis
     if (vadResult.speechEnded) {
         // 레이턴시 측정: VAD 발화 종료 시점을 로컬 변수로 저장 (세션에 저장 시 다음 발화에 의해 덮어씌워짐)
         const vadEndTimestamp = Date.now();
-        logger.info(`[Modular Pipeline] 발화 종료 감지 (CallSid: ${session.callSid})`);
+        logger.debug(`[Modular Pipeline] 발화 종료 감지 (CallSid: ${session.callSid})`);
 
         // 버퍼에 transcript가 있으면 LLM 처리
         if (session.transcriptBuffer && session.transcriptBuffer.length > 0) {
@@ -199,7 +199,7 @@ async function handleMediaMessage(sessionId: string, msg: TwilioMessage): Promis
             // LLM 처리 - VAD 종료 시점을 파라미터로 함께 전달
             handleFinalTranscript(sessionId, fullTranscript, vadEndTimestamp).catch(logger.error);
         } else {
-            logger.warn(`[Modular Pipeline] 발화 종료되었으나 transcript 버퍼가 비어있음 (CallSid: ${session.callSid})`);
+            logger.debug(`[Modular Pipeline] 발화 종료되었으나 transcript 버퍼가 비어있음 (CallSid: ${session.callSid})`);
         }
     }
 }
@@ -245,7 +245,7 @@ async function processLLMResponse(sessionId: string, userMessage: string, vadEnd
     if (!session) return;
 
     try {
-        logger.info(`[Modular Pipeline] LLM 처리 시작 (CallSid: ${session.callSid})`);
+        logger.debug(`[Modular Pipeline] LLM 처리 시작 (CallSid: ${session.callSid})`);
         const startTime = Date.now();
 
         // session에 저장된 시스템 프롬프트 항상 첨부
@@ -305,7 +305,7 @@ async function sendTTSResponse(sessionId: string, text: string, vadEndTimestamp?
 
         session.isTTSPlaying = true;
 
-        logger.info(`[Modular Pipeline] TTS 처리 시작 (CallSid: ${session.callSid}): "${text.substring(0, 50)}..."`);
+        logger.debug(`[Modular Pipeline] TTS 처리 시작 (CallSid: ${session.callSid}): "${text.substring(0, 50)}..."`);
 
         // TTSStreamer를 사용하여 텍스트를 TTS로 변환하고 Twilio로 스트리밍
         const result = await ttsStreamer.streamTextToTwilio(text, {
@@ -316,6 +316,11 @@ async function sendTTSResponse(sessionId: string, text: string, vadEndTimestamp?
         });
 
         if (result.success) {
+            // End-to-End Latency 로깅 (VAD 발화 종료 -> 첫 TTS 청크 전송)
+            if (vadEndTimestamp && result.firstChunkTimestamp) {
+                const endToEndLatency = result.firstChunkTimestamp - vadEndTimestamp;
+                logger.info(`[Modular Pipeline] End-to-End Latency: ${endToEndLatency}ms (CallSid: ${session.callSid})`);
+            }
             logger.info(
                 `[Modular Pipeline] TTS 완료 (${result.durationMs}ms, ${result.totalChunks} chunks, ${result.totalBytes} bytes, CallSid: ${session.callSid})`
             );

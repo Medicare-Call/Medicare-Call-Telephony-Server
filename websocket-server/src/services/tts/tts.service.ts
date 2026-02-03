@@ -54,11 +54,11 @@ export class TTSService {
 
             // 2. ArrayBuffer -> Buffer 변환
             const pcm24kBuffer = Buffer.from(await response.arrayBuffer());
-            logger.info(`OpenAI TTS 합성 완료: ${text.substring(0, 50)}... (${pcm24kBuffer.length} bytes)`);
+            logger.debug(`OpenAI TTS 합성 완료: ${text.substring(0, 50)}... (${pcm24kBuffer.length} bytes)`);
 
             // 3. PCM 24kHz -> ulaw 8kHz 변환 (리샘플링 + 형식 변환)
             const ulawBuffer = AudioUtils.convertPcmToUlaw(pcm24kBuffer, 24000, 8000);
-            logger.info(`오디오 변환 완료: ${pcm24kBuffer.length} bytes -> ${ulawBuffer.length} bytes`);
+            logger.debug(`오디오 변환 완료: ${pcm24kBuffer.length} bytes -> ${ulawBuffer.length} bytes`);
 
             return ulawBuffer;
         } catch (error) {
