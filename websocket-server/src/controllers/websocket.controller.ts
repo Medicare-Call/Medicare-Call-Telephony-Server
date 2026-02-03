@@ -5,9 +5,6 @@ import { OPENAI_API_KEY, WEBHOOK_URL } from '../config/env';
 import { handleRealtimePipelineConnection } from '../handlers/realtimePipelineHandler';
 import { handleModularPipelineConnection } from '../handlers/modularPipelineHandler';
 
-export const callConnections = new Map<string, WebSocket>();
-export const frontendConnections = new Map<string, WebSocket>();
-
 export const handleWebSocketConnection = (ws: WebSocket, req: IncomingMessage) => {
     try {
         const url = new URL(req.url || '', `http://${req.headers.host}`);
@@ -20,13 +17,6 @@ export const handleWebSocketConnection = (ws: WebSocket, req: IncomingMessage) =
         }
 
         const type = parts[0];
-
-        // TODO: frontendConnections이 연결만 존재하고 사용처가 없는데, deadCode 같아서 확인요함
-        if (type === 'logs') {
-            const sessionId = parts[1];
-            frontendConnections.set(sessionId, ws);
-            return;
-        }
 
         // Call Handling 엔드포인트: /call/{sessionId}/{elderId}/{pipeline}
         if (type === 'call') {
@@ -76,8 +66,6 @@ export const handleWebSocketConnection = (ws: WebSocket, req: IncomingMessage) =
             logger.info(
                 `WS 새 연결: pipeline=${pipeline}, sessionId=${sessionId}, elderId=${elderId}, prompt=${prompt ? '있음' : '없음'}`
             );
-
-            callConnections.set(sessionId, ws);
 
             ws.on('close', () => {
                 logger.info(`WebSocket 연결 종료됨 (CallSid: ${sessionId}). 상태 콜백이 번호 해제를 처리합니다.`);

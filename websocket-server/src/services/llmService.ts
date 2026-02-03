@@ -79,25 +79,7 @@ export class LLMService {
      * @returns AI의 초기 인사말
      */
     async generateInitialGreeting(systemPrompt: string): Promise<string> {
-        const messages: BaseMessage[] = [
-            new SystemMessage(systemPrompt),
-            new HumanMessage(''), // 빈 메시지로 응답 촉발
-        ];
-
-        try {
-            const response = await this.model.invoke(messages);
-
-            if (typeof response.content === 'string') {
-                return response.content;
-            } else {
-                return Array.isArray(response.content)
-                    ? response.content.map(c => (typeof c === 'string' ? c : JSON.stringify(c))).join(' ')
-                    : JSON.stringify(response.content);
-            }
-        } catch (error) {
-            console.error("초기 인사말 생성 중 오류 발생:", error);
-            throw error;
-        }
+        return this.generateResponse(systemPrompt, '');
     }
 
     /**
