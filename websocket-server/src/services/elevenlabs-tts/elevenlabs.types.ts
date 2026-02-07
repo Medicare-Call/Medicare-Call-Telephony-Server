@@ -5,7 +5,7 @@ import { WebSocket } from 'ws';
  */
 export interface ElevenLabsCallbacks {
     onAudioSentToTwilio?: (timestamp: number) => void;  // Twilio에 오디오 전송 시
-    onStreamComplete?: () => void;                      // isFinal 수신 또는 연결 종료 시
+    onStreamComplete?: () => void;                      // flush 후 오디오 완료 시
 }
 
 /**
@@ -21,7 +21,9 @@ export interface ElevenLabsSession {
     totalChunks: number;
     totalBytes: number;
     firstChunkTimestamp?: number;
-    callbacks?: ElevenLabsCallbacks; 
+    callbacks?: ElevenLabsCallbacks;
+    isFlushing: boolean;
+    flushCompletionTimer?: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -29,6 +31,7 @@ export interface ElevenLabsSession {
  */
 export interface ElevenLabsInputMessage {
     text: string;
+    flush?: boolean;
     voice_settings?: {
         stability: number;
         similarity_boost: number;

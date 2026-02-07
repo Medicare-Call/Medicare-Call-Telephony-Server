@@ -87,6 +87,7 @@ export class ElevenLabsService {
             buffer: Buffer.alloc(0),
             totalChunks: 0,
             totalBytes: 0,
+            isFlushing: false,
         };
 
         // 오디오 청크 수신 시 즉시 Twilio로 전송
@@ -121,9 +122,14 @@ export class ElevenLabsService {
         if (!session) return;
 
         session.isMuted = false;
+        session.isFlushing = false;
         session.firstChunkTimestamp = undefined;
         session.buffer = Buffer.alloc(0);
         session.callbacks = callbacks;
+        if (session.flushCompletionTimer) {
+            clearTimeout(session.flushCompletionTimer);
+            session.flushCompletionTimer = undefined;
+        }
 
         logger.debug(`[ElevenLabs] 새 응답 준비 완료: ${sessionId}`);
     }
@@ -163,9 +169,13 @@ export class ElevenLabsService {
         }
 
         if (session.ws.readyState === WebSocket.OPEN) {
-            // EOS (End of Stream) - 빈 문자열로 flush
-            const message: ElevenLabsInputMessage = { text: '' };
+            const message: ElevenLabsInputMessage = { text: '', flush: true };
             session.ws.send(JSON.stringify(message));
+            session.isFlushing = true;
+
+            // flush 이후 500ms 동안 오디오 청크가 없으면 완료로 판단
+            this.startFlushCompletionTimer(sessionId);
+
             logger.debug(`[ElevenLabs] Flush 전송: ${sessionId}`);
         } else {
             logger.warn(`[ElevenLabs] Flush 실패 - WebSocket 닫힘 (state: ${session.ws.readyState}): ${sessionId}`);
@@ -195,20 +205,13 @@ export class ElevenLabsService {
                 return;
             }
 
-            // isFinal 메시지 처리 (오디오 생성 완료)
-            if (response.isFinal) {
-                logger.debug(`[ElevenLabs] isFinal 수신: ${sessionId}`);
-                
-                this.flushRemainingBuffer(sessionId);
-
-                if (session.callbacks?.onStreamComplete) {
-                    session.callbacks.onStreamComplete();
-                }
+            if (!response.audio) {
                 return;
             }
 
-            if (!response.audio) {
-                return;
+            // flush 중이면 오디오 수신할 때마다 타이머 리셋
+            if (session.isFlushing) {
+                this.startFlushCompletionTimer(sessionId);
             }
 
             // 첫 청크 타임스탬프 기록
@@ -245,7 +248,32 @@ export class ElevenLabsService {
     }
 
     /**
-     * 남은 버퍼 강제 전송 (isFinal 수신 시 호출)
+     * flush 완료 타이머 시작/리셋
+     * 500ms 동안 오디오 청크가 없으면 onStreamComplete 호출
+     */
+    private startFlushCompletionTimer(sessionId: string): void {
+        const session = this.sessions.get(sessionId);
+        if (!session) return;
+
+        if (session.flushCompletionTimer) {
+            clearTimeout(session.flushCompletionTimer);
+        }
+
+        session.flushCompletionTimer = setTimeout(() => {
+            session.isFlushing = false;
+            session.flushCompletionTimer = undefined;
+
+            this.flushRemainingBuffer(sessionId);
+
+            if (session.callbacks?.onStreamComplete) {
+                logger.debug(`[ElevenLabs] Flush 완료 (타이머): ${sessionId}`);
+                session.callbacks.onStreamComplete();
+            }
+        }, 500);
+    }
+
+    /**
+     * 남은 버퍼 강제 전송
      * @param {string} sessionId - 세션 ID
      */
     private flushRemainingBuffer(sessionId: string): void {
@@ -306,26 +334,30 @@ export class ElevenLabsService {
     }
 
     /**
-     * 인터럽트 처리 (오디오 전송 차단 + 세션 종료)
+     * 인터럽트 처리 (오디오 전송 차단, 연결 유지)
      * @param {string} sessionId - 세션 ID
      */
     interruptStream(sessionId: string): void {
         const session = this.sessions.get(sessionId);
         if (!session) return;
 
-        // 세션 비활성화 및 내부 버퍼 & 콜백 초기화
-        session.isActive = false;
+        // 오디오 전송 차단 및 내부 버퍼 & 콜백 초기화
         session.isMuted = true;
+        session.isFlushing = false;
         session.buffer = Buffer.alloc(0);
         session.callbacks = undefined;
-
-        // WebSocket 명시적 종료 및 세션 삭제 다음 LLM 응답 시 isSessionActive()가 false를 반환하여 재연결
-        if (session.ws.readyState === WebSocket.OPEN) {
-            session.ws.close();
+        if (session.flushCompletionTimer) {
+            clearTimeout(session.flushCompletionTimer);
+            session.flushCompletionTimer = undefined;
         }
-        this.sessions.delete(sessionId);
 
-        logger.debug(`[ElevenLabs] 스트림 인터럽트 및 세션 종료: ${sessionId}`);
+        // ElevenLabs 서버에 flush 요청
+        if (session.ws.readyState === WebSocket.OPEN) {
+            const message: ElevenLabsInputMessage = { text: '', flush: true };
+            session.ws.send(JSON.stringify(message));
+        }
+
+        logger.debug(`[ElevenLabs] 스트림 인터럽트: ${sessionId}`);
     }
 
     /**
@@ -339,6 +371,8 @@ export class ElevenLabsService {
         session.isActive = false;
 
         if (session.ws.readyState === WebSocket.OPEN) {
+            const message: ElevenLabsInputMessage = { text: '' };
+            session.ws.send(JSON.stringify(message));
             session.ws.close();
         }
 
