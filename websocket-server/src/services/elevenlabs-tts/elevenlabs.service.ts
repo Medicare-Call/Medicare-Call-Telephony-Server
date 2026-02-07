@@ -64,6 +64,7 @@ export class ElevenLabsService {
                         similarity_boost: this.config.similarityBoost || 0.75,
                         speed: this.config.speed || 0.8,
                     },
+                    chunk_length_schedule: [50, 100, 150, 200],
                     xi_api_key: this.config.apiKey,
                 };
                 ws.send(JSON.stringify(initMessage));
@@ -148,7 +149,7 @@ export class ElevenLabsService {
         }
 
         if (session.ws.readyState === WebSocket.OPEN) {
-            const message: ElevenLabsInputMessage = { text: token };
+            const message: ElevenLabsInputMessage = { text: token, try_trigger_generation: true };
             session.ws.send(JSON.stringify(message));
             logger.debug(`[ElevenLabs] 토큰 전송 (${token.length}자): ${sessionId}`);
         } else {

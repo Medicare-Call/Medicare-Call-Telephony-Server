@@ -32,6 +32,8 @@ export interface ElevenLabsSession {
 export interface ElevenLabsInputMessage {
     text: string;
     flush?: boolean;
+    try_trigger_generation?: boolean;
+    chunk_length_schedule?: number[];
     voice_settings?: {
         stability: number;
         similarity_boost: number;
