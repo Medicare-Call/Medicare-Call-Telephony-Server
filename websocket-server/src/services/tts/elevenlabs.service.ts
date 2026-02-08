@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
 import logger from '../../config/logger';
 import { ElevenLabsConfig, defaultConfig, buildWebSocketUrl } from './elevenlabs.config';
-import { ElevenLabsSession, ElevenLabsInputMessage, ElevenLabsOutputMessage, ElevenLabsStreamResult, ElevenLabsCallbacks } from './elevenlabs.types';
+import { ElevenLabsSession, ElevenLabsInputMessage, ElevenLabsOutputMessage, ElevenLabsStreamResult, TTSCallbacks } from './elevenlabs.types';
 
 export class ElevenLabsService {
     private config: ElevenLabsConfig;
@@ -116,9 +116,9 @@ export class ElevenLabsService {
      * 새 응답 시작 전 상태 초기화 및 콜백 등록
      * LLM 응답 시작 전에 호출해야 함
      * @param {string} sessionId - 세션 ID
-     * @param {ElevenLabsCallbacks} callbacks - TTS 콜백
+     * @param {TTSCallbacks} callbacks - TTS 콜백
      */
-    prepareForNewResponse(sessionId: string, callbacks?: ElevenLabsCallbacks): void {
+    prepareForNewResponse(sessionId: string, callbacks?: TTSCallbacks): void {
         const session = this.sessions.get(sessionId);
         if (!session) return;
 

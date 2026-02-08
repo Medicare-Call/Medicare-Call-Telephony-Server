@@ -5,4 +5,4 @@ export const ttsService = new ElevenLabsService(defaultConfig);
 
 export { ElevenLabsService } from './elevenlabs.service';
 export type { ElevenLabsConfig } from './elevenlabs.config';
-export type { ElevenLabsSession, ElevenLabsStreamResult } from './elevenlabs.types';
+export type { TTSCallbacks, ElevenLabsSession, ElevenLabsStreamResult } from './elevenlabs.types';

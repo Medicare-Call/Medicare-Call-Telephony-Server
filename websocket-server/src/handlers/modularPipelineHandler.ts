@@ -3,7 +3,7 @@ import { RawData, WebSocket } from 'ws';
 import logger from '../config/logger';
 import { sttService, STTCallbacks } from '../services/stt';
 import { llmService, LLMCallbacks } from '../services/llm';
-import { ttsService } from '../services/tts';
+import { ttsService, TTSCallbacks } from '../services/tts';
 import { processAudioWithVAD } from '../services/vad.service';
 import { getSession, closeAllConnections } from '../services/sessionManager';
 import { latencyTracker } from '../services/latencyTracker';
@@ -272,6 +272,42 @@ async function handleStreamStop(sessionId: string): Promise<void> {
     closeAllConnections(sessionId);
 }
 
+/**
+ * TTS 콜백 생성 - processLLMResponse, sendAIResponse에서 공통 사용
+ */
+function buildTTSCallbacks(sessionId: string): TTSCallbacks {
+    const session = getSession(sessionId);
+    if (!session) return {};
+
+    return {
+        onAudioSentToTwilio: (timestamp) => {
+            session.lastAudioSentToTwilio = timestamp;
+            // 첫 청크 전송 시 레이턴시 기록
+            if (!session.responseStartTimestamp) {
+                session.responseStartTimestamp = timestamp;
+                latencyTracker.recordTTSFirstChunk(sessionId, session.callSid, timestamp);
+            }
+        },
+        onStreamComplete: () => {
+            // TTS 완료 시 히스토리 저장
+            if (!session.wasInterrupted && session.pendingAIResponse) {
+                session.conversationHistory.push({
+                    is_elderly: false,
+                    conversation: session.pendingAIResponse,
+                });
+                session.lastAIHistorySavedAt = Date.now(); // 롤백용 타임스탬프
+                logger.debug(`[Modular Pipeline] AI 응답 히스토리 저장 (CallSid: ${session.callSid})`);
+            } else if (session.wasInterrupted) {
+                logger.debug(`[Modular Pipeline] AI 응답 인터럽트됨 - 히스토리 스킵 (CallSid: ${session.callSid})`);
+            }
+
+            session.isTTSPlaying = false;
+            session.pendingAIResponse = undefined;
+            session.responseStartTimestamp = undefined;
+        }
+    };
+}
+
 async function handleFinalTranscript(sessionId: string, transcript: string): Promise<void> {
     const session = getSession(sessionId);
     if (!session) return;
@@ -321,34 +357,8 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
 
         logger.debug(`[Modular Pipeline] LLM 스트리밍 시작 준비 완료 (CallSid: ${session.callSid})`);
 
-        // ElevenLabs 콜백 설정
-        ttsService.prepareForNewResponse(sessionId, {
-            onAudioSentToTwilio: (timestamp) => {
-                session.lastAudioSentToTwilio = timestamp;
-                // 첫 청크 전송 시 레이턴시 기록
-                if (!session.responseStartTimestamp) {
-                    session.responseStartTimestamp = timestamp;
-                    latencyTracker.recordTTSFirstChunk(sessionId, session.callSid, timestamp);
-                }
-            },
-            onStreamComplete: () => {
-                // TTS 완료 시 히스토리 저장
-                if (!session.wasInterrupted && session.pendingAIResponse) {
-                    session.conversationHistory.push({
-                        is_elderly: false,
-                        conversation: session.pendingAIResponse,
-                    });
-                    session.lastAIHistorySavedAt = Date.now(); // 롤백용 타임스탬프
-                    logger.debug(`[Modular Pipeline] AI 응답 히스토리 저장 (CallSid: ${session.callSid})`);
-                } else if (session.wasInterrupted) {
-                    logger.debug(`[Modular Pipeline] AI 응답 인터럽트됨 - 히스토리 스킵 (CallSid: ${session.callSid})`);
-                }
-
-                session.isTTSPlaying = false;
-                session.pendingAIResponse = undefined;
-                session.responseStartTimestamp = undefined;
-            }
-        });
+        // TTS 콜백 설정
+        ttsService.prepareForNewResponse(sessionId, buildTTSCallbacks(sessionId));
 
         const systemPrompt = session.prompt ||
             '당신은 친절한 AI 어시스턴트입니다. 사용자의 질문에 간결하고 명확하게 답변해주세요.';
@@ -432,33 +442,8 @@ async function sendAIResponse(sessionId: string, text: string): Promise<void> {
 
     logger.debug(`[Modular Pipeline] sendAIResponse 시작 (${text.length}자, CallSid: ${session.callSid})`);
 
-    // ElevenLabs 콜백 설정
-    ttsService.prepareForNewResponse(sessionId, {
-        onAudioSentToTwilio: (timestamp) => {
-            session.lastAudioSentToTwilio = timestamp;
-            if (!session.responseStartTimestamp) {
-                session.responseStartTimestamp = timestamp;
-                latencyTracker.recordTTSFirstChunk(sessionId, session.callSid, timestamp);
-            }
-        },
-        onStreamComplete: () => {
-            // TTS 완료 시 히스토리 저장
-            if (!session.wasInterrupted && session.pendingAIResponse) {
-                session.conversationHistory.push({
-                    is_elderly: false,
-                    conversation: session.pendingAIResponse,
-                });
-                session.lastAIHistorySavedAt = Date.now(); // 롤백용 타임스탬프
-                logger.info(`[Modular Pipeline] AI 응답 히스토리 저장 (CallSid: ${session.callSid})`);
-            } else if (session.wasInterrupted) {
-                logger.info(`[Modular Pipeline] AI 응답 인터럽트됨 - 히스토리 스킵 (CallSid: ${session.callSid})`);
-            }
-
-            session.isTTSPlaying = false;
-            session.pendingAIResponse = undefined;
-            session.responseStartTimestamp = undefined;
-        }
-    });
+    // TTS 콜백 설정
+    ttsService.prepareForNewResponse(sessionId, buildTTSCallbacks(sessionId));
 
     // ElevenLabs로 텍스트 전송
     ttsService.sendToken(sessionId, text);
