@@ -7,7 +7,7 @@ import { processAudioWithVAD } from '../services/vad.service';
 import { sttService, STTCallbacks } from '../services/stt';
 import { LLMService, StreamCallbacks } from '../services/llmService';
 import { OPENAI_API_KEY } from '../config/env';
-import { elevenLabsService } from '../services/elevenlabs-tts';
+import { ttsService } from '../services/tts';
 import { latencyTracker } from '../services/latencyTracker';
 
 // LLM 서비스 인스턴스
@@ -118,7 +118,7 @@ async function handleStreamStart(sessionId: string, msg: TwilioMessage): Promise
 
     // ElevenLabs TTS 세션 시작
     try {
-        await elevenLabsService.startSession(
+        await ttsService.startSession(
             sessionId,
             session.twilioConn!,
             session.streamSid!
@@ -217,7 +217,7 @@ function handleInterrupt(sessionId: string): void {
     }
 
     // 3. ElevenLabs 스트림 중단
-    elevenLabsService.interruptStream(sessionId);
+    ttsService.interruptStream(sessionId);
 
     // 4. LLM 스트리밍 중단
     if (session.currentLLMAbortController) {
@@ -266,7 +266,7 @@ async function handleStreamStop(sessionId: string): Promise<void> {
 
     // ElevenLabs TTS 세션 종료
     try {
-        elevenLabsService.stopSession(sessionId);
+        ttsService.stopSession(sessionId);
         logger.info(`[Modular Pipeline] ElevenLabs TTS 세션 종료 완료 (CallSid: ${session.callSid})`);
     } catch (err) {
         logger.error(`[Modular Pipeline] ElevenLabs TTS 세션 종료 실패 (CallSid: ${session.callSid}):`, err);
@@ -303,9 +303,9 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
 
     try {
         // ElevenLabs 세션이 없으면 재연결
-        if (!elevenLabsService.isSessionActive(sessionId)) {
+        if (!ttsService.isSessionActive(sessionId)) {
             logger.info(`[Modular Pipeline] ElevenLabs 세션 재연결 (CallSid: ${session.callSid})`);
-            await elevenLabsService.startSession(
+            await ttsService.startSession(
                 sessionId,
                 session.twilioConn!,
                 session.streamSid!
@@ -325,7 +325,7 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
         logger.debug(`[Modular Pipeline] LLM 스트리밍 시작 준비 완료 (CallSid: ${session.callSid})`);
 
         // ElevenLabs 콜백 설정
-        elevenLabsService.prepareForNewResponse(sessionId, {
+        ttsService.prepareForNewResponse(sessionId, {
             onAudioSentToTwilio: (timestamp) => {
                 session.lastAudioSentToTwilio = timestamp;
                 // 첫 청크 전송 시 레이턴시 기록
@@ -370,7 +370,7 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
             },
             onToken: (token) => {
                 if (!session.wasInterrupted) {
-                    elevenLabsService.sendToken(sessionId, token);
+                    ttsService.sendToken(sessionId, token);
                 }
             },
             onComplete: (fullResponse) => {
@@ -380,7 +380,7 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
                 // flush 전송하여 남은 텍스트 처리 요청
                 if (!session.wasInterrupted) {
                     logger.debug(`[Modular Pipeline] ElevenLabs flush 전송 (CallSid: ${session.callSid})`);
-                    elevenLabsService.flush(sessionId);
+                    ttsService.flush(sessionId);
                 } else {
                     logger.debug(`[Modular Pipeline] 인터럽트 상태 - flush 스킵 (CallSid: ${session.callSid})`);
                 }
@@ -419,9 +419,9 @@ async function sendAIResponse(sessionId: string, text: string): Promise<void> {
     if (!session) return;
 
     // ElevenLabs 세션이 없으면 재연결
-    if (!elevenLabsService.isSessionActive(sessionId)) {
+    if (!ttsService.isSessionActive(sessionId)) {
         logger.info(`[Modular Pipeline] ElevenLabs 세션 재연결 (CallSid: ${session.callSid})`);
-        await elevenLabsService.startSession(
+        await ttsService.startSession(
             sessionId,
             session.twilioConn!,
             session.streamSid!
@@ -436,7 +436,7 @@ async function sendAIResponse(sessionId: string, text: string): Promise<void> {
     logger.debug(`[Modular Pipeline] sendAIResponse 시작 (${text.length}자, CallSid: ${session.callSid})`);
 
     // ElevenLabs 콜백 설정
-    elevenLabsService.prepareForNewResponse(sessionId, {
+    ttsService.prepareForNewResponse(sessionId, {
         onAudioSentToTwilio: (timestamp) => {
             session.lastAudioSentToTwilio = timestamp;
             if (!session.responseStartTimestamp) {
@@ -464,6 +464,6 @@ async function sendAIResponse(sessionId: string, text: string): Promise<void> {
     });
 
     // ElevenLabs로 텍스트 전송
-    elevenLabsService.sendToken(sessionId, text);
-    elevenLabsService.flush(sessionId);
+    ttsService.sendToken(sessionId, text);
+    ttsService.flush(sessionId);
 }
