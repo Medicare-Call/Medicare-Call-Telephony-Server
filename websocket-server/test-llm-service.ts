@@ -1,4 +1,4 @@
-import { LLMService } from './src/services/llmService';
+import { LLMService } from './src/services/llm';
 import dotenv from 'dotenv';
 
 dotenv.config();

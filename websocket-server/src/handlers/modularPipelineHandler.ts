@@ -1,17 +1,14 @@
 import { RawData, WebSocket } from 'ws';
+
 import logger from '../config/logger';
+import { sttService, STTCallbacks } from '../services/stt';
+import { llmService, LLMCallbacks } from '../services/llm';
+import { ttsService } from '../services/tts';
+import { processAudioWithVAD } from '../services/vad.service';
 import { getSession, closeAllConnections } from '../services/sessionManager';
+import { latencyTracker } from '../services/latencyTracker';
 import { TwilioMessage } from '../types/twilio.types';
 import { parseMessage } from '../utils/websocket.utils';
-import { processAudioWithVAD } from '../services/vad.service';
-import { sttService, STTCallbacks } from '../services/stt';
-import { LLMService, StreamCallbacks } from '../services/llmService';
-import { OPENAI_API_KEY } from '../config/env';
-import { ttsService } from '../services/tts';
-import { latencyTracker } from '../services/latencyTracker';
-
-// LLM 서비스 인스턴스
-const llmService = new LLMService(OPENAI_API_KEY);
 
 export function handleModularPipelineConnection(
     ws: WebSocket,
@@ -364,7 +361,7 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
         latencyTracker.recordLLMCall(sessionId, session.callSid);
 
         // LLM 스트리밍 콜백 설정
-        const callbacks: StreamCallbacks = {
+        const llmCallbacks: LLMCallbacks = {
             onFirstToken: () => {
                 latencyTracker.recordLLMFirstToken(sessionId, session.callSid);
             },
@@ -399,7 +396,7 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
         };
 
         // LLM 스트리밍 시작
-        await llmService.streamResponse(systemPrompt, userMessage, callbacks, history, abortController);
+        await llmService.streamResponse(systemPrompt, userMessage, llmCallbacks, history, abortController);
 
     } catch (err) {
         logger.error(`[Modular Pipeline] LLM 처리 실패 (CallSid: ${session.callSid}):`, err);
