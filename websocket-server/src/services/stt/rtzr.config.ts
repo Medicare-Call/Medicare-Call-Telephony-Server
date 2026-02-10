@@ -1,5 +1,5 @@
 import { RTZR_CLIENT_ID, RTZR_CLIENT_SECRET } from '../../config/env';
-import { STTConfig } from './stt.types';
+import { STTConfig } from './rtzr.types';
 
 export const RTZR_AUTH_URL = 'https://openapi.vito.ai/v1/authenticate';
 export const RTZR_WS_URL = 'wss://openapi.vito.ai/v1/transcribe:streaming';

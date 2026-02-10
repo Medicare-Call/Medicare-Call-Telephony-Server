@@ -3,7 +3,7 @@ import { WebSocket } from 'ws';
 /**
  * ElevenLabs TTS 콜백
  */
-export interface ElevenLabsCallbacks {
+export interface TTSCallbacks {
     onAudioSentToTwilio?: (timestamp: number) => void;  // Twilio에 오디오 전송 시
     onStreamComplete?: () => void;                      // flush 후 오디오 완료 시
 }
@@ -21,7 +21,7 @@ export interface ElevenLabsSession {
     totalChunks: number;
     totalBytes: number;
     firstChunkTimestamp?: number;
-    callbacks?: ElevenLabsCallbacks;
+    callbacks?: TTSCallbacks;
     isFlushing: boolean;
     flushCompletionTimer?: ReturnType<typeof setTimeout>;
 }

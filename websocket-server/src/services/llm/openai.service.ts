@@ -1,22 +1,12 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, SystemMessage, AIMessage, BaseMessage } from "@langchain/core/messages";
-
-export interface ChatMessage {
-    role: 'user' | 'assistant' | 'system';
-    content: string;
-}
-
-export interface StreamCallbacks {
-    onFirstToken?: () => void;
-    onToken?: (token: string) => void;
-    onComplete?: (fullResponse: string) => void;
-    onError?: (error: Error) => void;
-}
+import { ChatMessage, LLMCallbacks } from './openai.types';
+import { LLM_DEFAULT_MODEL, LLM_DEFAULT_TEMPERATURE } from './openai.config';
 
 export class LLMService {
     private model: ChatOpenAI;
 
-    constructor(apiKey: string, modelName: string = "gpt-4o-mini", temperature: number = 0.7) {
+    constructor(apiKey: string, modelName: string = LLM_DEFAULT_MODEL, temperature: number = LLM_DEFAULT_TEMPERATURE) {
         this.model = new ChatOpenAI({
             openAIApiKey: apiKey,
             modelName: modelName,
@@ -35,7 +25,7 @@ export class LLMService {
     async streamResponse(
         systemPrompt: string,
         userMessage: string,
-        callbacks: StreamCallbacks,
+        callbacks: LLMCallbacks,
         history: ChatMessage[] = [],
         abortController?: AbortController
     ): Promise<void> {

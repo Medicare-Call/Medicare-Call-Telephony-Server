@@ -1,17 +1,14 @@
 import { RawData, WebSocket } from 'ws';
+
 import logger from '../config/logger';
+import { sttService, STTCallbacks } from '../services/stt';
+import { llmService, LLMCallbacks } from '../services/llm';
+import { ttsService, TTSCallbacks } from '../services/tts';
+import { processAudioWithVAD } from '../services/vad.service';
 import { getSession, closeAllConnections } from '../services/sessionManager';
+import { latencyTracker } from '../services/latencyTracker';
 import { TwilioMessage } from '../types/twilio.types';
 import { parseMessage } from '../utils/websocket.utils';
-import { processAudioWithVAD } from '../services/vad.service';
-import { sttService, STTCallbacks } from '../services/stt';
-import { LLMService, StreamCallbacks } from '../services/llmService';
-import { OPENAI_API_KEY } from '../config/env';
-import { elevenLabsService } from '../services/elevenlabs-tts';
-import { latencyTracker } from '../services/latencyTracker';
-
-// LLM 서비스 인스턴스
-const llmService = new LLMService(OPENAI_API_KEY);
 
 export function handleModularPipelineConnection(
     ws: WebSocket,
@@ -118,7 +115,7 @@ async function handleStreamStart(sessionId: string, msg: TwilioMessage): Promise
 
     // ElevenLabs TTS 세션 시작
     try {
-        await elevenLabsService.startSession(
+        await ttsService.startSession(
             sessionId,
             session.twilioConn!,
             session.streamSid!
@@ -217,7 +214,7 @@ function handleInterrupt(sessionId: string): void {
     }
 
     // 3. ElevenLabs 스트림 중단
-    elevenLabsService.interruptStream(sessionId);
+    ttsService.interruptStream(sessionId);
 
     // 4. LLM 스트리밍 중단
     if (session.currentLLMAbortController) {
@@ -266,13 +263,49 @@ async function handleStreamStop(sessionId: string): Promise<void> {
 
     // ElevenLabs TTS 세션 종료
     try {
-        elevenLabsService.stopSession(sessionId);
+        ttsService.stopSession(sessionId);
         logger.info(`[Modular Pipeline] ElevenLabs TTS 세션 종료 완료 (CallSid: ${session.callSid})`);
     } catch (err) {
         logger.error(`[Modular Pipeline] ElevenLabs TTS 세션 종료 실패 (CallSid: ${session.callSid}):`, err);
     }
 
     closeAllConnections(sessionId);
+}
+
+/**
+ * TTS 콜백 생성 - processLLMResponse, sendAIResponse에서 공통 사용
+ */
+function buildTTSCallbacks(sessionId: string): TTSCallbacks {
+    const session = getSession(sessionId);
+    if (!session) return {};
+
+    return {
+        onAudioSentToTwilio: (timestamp) => {
+            session.lastAudioSentToTwilio = timestamp;
+            // 첫 청크 전송 시 레이턴시 기록
+            if (!session.responseStartTimestamp) {
+                session.responseStartTimestamp = timestamp;
+                latencyTracker.recordTTSFirstChunk(sessionId, session.callSid, timestamp);
+            }
+        },
+        onStreamComplete: () => {
+            // TTS 완료 시 히스토리 저장
+            if (!session.wasInterrupted && session.pendingAIResponse) {
+                session.conversationHistory.push({
+                    is_elderly: false,
+                    conversation: session.pendingAIResponse,
+                });
+                session.lastAIHistorySavedAt = Date.now(); // 롤백용 타임스탬프
+                logger.debug(`[Modular Pipeline] AI 응답 히스토리 저장 (CallSid: ${session.callSid})`);
+            } else if (session.wasInterrupted) {
+                logger.debug(`[Modular Pipeline] AI 응답 인터럽트됨 - 히스토리 스킵 (CallSid: ${session.callSid})`);
+            }
+
+            session.isTTSPlaying = false;
+            session.pendingAIResponse = undefined;
+            session.responseStartTimestamp = undefined;
+        }
+    };
 }
 
 async function handleFinalTranscript(sessionId: string, transcript: string): Promise<void> {
@@ -303,9 +336,9 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
 
     try {
         // ElevenLabs 세션이 없으면 재연결
-        if (!elevenLabsService.isSessionActive(sessionId)) {
+        if (!ttsService.isSessionActive(sessionId)) {
             logger.info(`[Modular Pipeline] ElevenLabs 세션 재연결 (CallSid: ${session.callSid})`);
-            await elevenLabsService.startSession(
+            await ttsService.startSession(
                 sessionId,
                 session.twilioConn!,
                 session.streamSid!
@@ -324,34 +357,8 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
 
         logger.debug(`[Modular Pipeline] LLM 스트리밍 시작 준비 완료 (CallSid: ${session.callSid})`);
 
-        // ElevenLabs 콜백 설정
-        elevenLabsService.prepareForNewResponse(sessionId, {
-            onAudioSentToTwilio: (timestamp) => {
-                session.lastAudioSentToTwilio = timestamp;
-                // 첫 청크 전송 시 레이턴시 기록
-                if (!session.responseStartTimestamp) {
-                    session.responseStartTimestamp = timestamp;
-                    latencyTracker.recordTTSFirstChunk(sessionId, session.callSid, timestamp);
-                }
-            },
-            onStreamComplete: () => {
-                // TTS 완료 시 히스토리 저장
-                if (!session.wasInterrupted && session.pendingAIResponse) {
-                    session.conversationHistory.push({
-                        is_elderly: false,
-                        conversation: session.pendingAIResponse,
-                    });
-                    session.lastAIHistorySavedAt = Date.now(); // 롤백용 타임스탬프
-                    logger.debug(`[Modular Pipeline] AI 응답 히스토리 저장 (CallSid: ${session.callSid})`);
-                } else if (session.wasInterrupted) {
-                    logger.debug(`[Modular Pipeline] AI 응답 인터럽트됨 - 히스토리 스킵 (CallSid: ${session.callSid})`);
-                }
-
-                session.isTTSPlaying = false;
-                session.pendingAIResponse = undefined;
-                session.responseStartTimestamp = undefined;
-            }
-        });
+        // TTS 콜백 설정
+        ttsService.prepareForNewResponse(sessionId, buildTTSCallbacks(sessionId));
 
         const systemPrompt = session.prompt ||
             '당신은 친절한 AI 어시스턴트입니다. 사용자의 질문에 간결하고 명확하게 답변해주세요.';
@@ -364,13 +371,13 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
         latencyTracker.recordLLMCall(sessionId, session.callSid);
 
         // LLM 스트리밍 콜백 설정
-        const callbacks: StreamCallbacks = {
+        const llmCallbacks: LLMCallbacks = {
             onFirstToken: () => {
                 latencyTracker.recordLLMFirstToken(sessionId, session.callSid);
             },
             onToken: (token) => {
                 if (!session.wasInterrupted) {
-                    elevenLabsService.sendToken(sessionId, token);
+                    ttsService.sendToken(sessionId, token);
                 }
             },
             onComplete: (fullResponse) => {
@@ -380,7 +387,7 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
                 // flush 전송하여 남은 텍스트 처리 요청
                 if (!session.wasInterrupted) {
                     logger.debug(`[Modular Pipeline] ElevenLabs flush 전송 (CallSid: ${session.callSid})`);
-                    elevenLabsService.flush(sessionId);
+                    ttsService.flush(sessionId);
                 } else {
                     logger.debug(`[Modular Pipeline] 인터럽트 상태 - flush 스킵 (CallSid: ${session.callSid})`);
                 }
@@ -399,7 +406,7 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
         };
 
         // LLM 스트리밍 시작
-        await llmService.streamResponse(systemPrompt, userMessage, callbacks, history, abortController);
+        await llmService.streamResponse(systemPrompt, userMessage, llmCallbacks, history, abortController);
 
     } catch (err) {
         logger.error(`[Modular Pipeline] LLM 처리 실패 (CallSid: ${session.callSid}):`, err);
@@ -419,9 +426,9 @@ async function sendAIResponse(sessionId: string, text: string): Promise<void> {
     if (!session) return;
 
     // ElevenLabs 세션이 없으면 재연결
-    if (!elevenLabsService.isSessionActive(sessionId)) {
+    if (!ttsService.isSessionActive(sessionId)) {
         logger.info(`[Modular Pipeline] ElevenLabs 세션 재연결 (CallSid: ${session.callSid})`);
-        await elevenLabsService.startSession(
+        await ttsService.startSession(
             sessionId,
             session.twilioConn!,
             session.streamSid!
@@ -435,35 +442,10 @@ async function sendAIResponse(sessionId: string, text: string): Promise<void> {
 
     logger.debug(`[Modular Pipeline] sendAIResponse 시작 (${text.length}자, CallSid: ${session.callSid})`);
 
-    // ElevenLabs 콜백 설정
-    elevenLabsService.prepareForNewResponse(sessionId, {
-        onAudioSentToTwilio: (timestamp) => {
-            session.lastAudioSentToTwilio = timestamp;
-            if (!session.responseStartTimestamp) {
-                session.responseStartTimestamp = timestamp;
-                latencyTracker.recordTTSFirstChunk(sessionId, session.callSid, timestamp);
-            }
-        },
-        onStreamComplete: () => {
-            // TTS 완료 시 히스토리 저장
-            if (!session.wasInterrupted && session.pendingAIResponse) {
-                session.conversationHistory.push({
-                    is_elderly: false,
-                    conversation: session.pendingAIResponse,
-                });
-                session.lastAIHistorySavedAt = Date.now(); // 롤백용 타임스탬프
-                logger.info(`[Modular Pipeline] AI 응답 히스토리 저장 (CallSid: ${session.callSid})`);
-            } else if (session.wasInterrupted) {
-                logger.info(`[Modular Pipeline] AI 응답 인터럽트됨 - 히스토리 스킵 (CallSid: ${session.callSid})`);
-            }
-
-            session.isTTSPlaying = false;
-            session.pendingAIResponse = undefined;
-            session.responseStartTimestamp = undefined;
-        }
-    });
+    // TTS 콜백 설정
+    ttsService.prepareForNewResponse(sessionId, buildTTSCallbacks(sessionId));
 
     // ElevenLabs로 텍스트 전송
-    elevenLabsService.sendToken(sessionId, text);
-    elevenLabsService.flush(sessionId);
+    ttsService.sendToken(sessionId, text);
+    ttsService.flush(sessionId);
 }

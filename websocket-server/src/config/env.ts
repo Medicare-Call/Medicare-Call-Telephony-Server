@@ -17,11 +17,6 @@ export const TWILIO_CALLER_NUMBERS = process.env.TWILIO_CALLER_NUMBERS?.split(',
 export const RTZR_CLIENT_ID = process.env.RTZR_CLIENT_ID || '';
 export const RTZR_CLIENT_SECRET = process.env.RTZR_CLIENT_SECRET || '';
 
-// GPT-4o TTS
-export const TTS_MODEL = process.env.TTS_MODEL || 'tts-1';
-export const TTS_VOICE = process.env.TTS_VOICE || 'alloy'; // 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'
-export const TTS_SPEED = process.env.TTS_SPEED || '1.0';
-
 // ElevenLabs TTS
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
 export const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL';

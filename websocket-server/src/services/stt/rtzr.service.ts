@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
 import logger from '../../config/logger';
-import { STTConfig, STTCallbacks, STTSession } from './stt.types';
-import { RTZR_AUTH_URL, RTZR_WS_URL } from './stt.config';
+import { STTConfig, STTCallbacks, STTSession } from './rtzr.types';
+import { RTZR_AUTH_URL, RTZR_WS_URL } from './rtzr.config';
 
 /**
  * 리턴제로 WebSocket 스트리밍 STT 서비스
