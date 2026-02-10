@@ -48,6 +48,9 @@ jobs:
                       S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
                       RTZR_CLIENT_ID="${{ secrets.RTZR_CLIENT_ID }}"
                       RTZR_CLIENT_SECRET="${{ secrets.RTZR_CLIENT_SECRET }}"
+                      ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}"
+                      ELEVENLABS_VOICE_ID="${{ secrets.ELEVENLABS_VOICE_ID }}"
+                      ELEVENLABS_MODEL_ID="${{ secrets.ELEVENLABS_MODEL_ID }}"
 
                       echo "Stopping existing container"
                       sudo docker stop medicare-node || true
@@ -78,6 +81,9 @@ jobs:
                       -e S3_BUCKET_NAME="${S3_BUCKET_NAME}" \
                       -e RTZR_CLIENT_ID="${RTZR_CLIENT_ID}" \
                       -e RTZR_CLIENT_SECRET="${RTZR_CLIENT_SECRET}" \
+                      -e ELEVENLABS_API_KEY="${ELEVENLABS_API_KEY}" \
+                      -e ELEVENLABS_VOICE_ID="${ELEVENLABS_VOICE_ID}" \
+                      -e ELEVENLABS_MODEL_ID="${ELEVENLABS_MODEL_ID}" \
                       "${DOCKER_USERNAME}/${DOCKER_IMAGE_NODE}"
 
                       # 컨테이너 실행 확인
