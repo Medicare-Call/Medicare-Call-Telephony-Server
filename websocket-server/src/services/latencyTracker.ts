@@ -51,6 +51,9 @@ class LatencyTracker {
         const timings = this.sessions.get(sessionId);
         if (!timings || timings.TTSFirstChunk) return;
 
+        // LLM 첫 토큰 이전의 오디오는 이전 응답의 잔여 오디오이므로 로깅없이 return
+        if (!timings.LLMFirstToken) return;
+
         timings.TTSFirstChunk = timestamp;
 
         if (timings.LLMFirstToken) {

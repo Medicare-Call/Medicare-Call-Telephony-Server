@@ -170,12 +170,12 @@ async function handleMediaMessage(sessionId: string, msg: TwilioMessage): Promis
 
     // 5. 발화가 끝났을 때 버퍼의 모든 transcript를 LLM에 전달
     if (vadResult.speechEnded) {
-        latencyTracker.start(sessionId);
-        latencyTracker.recordVADEnd(sessionId);
         logger.debug(`[Modular Pipeline] 발화 종료 감지 (CallSid: ${session.callSid})`);
 
         // 버퍼에 transcript가 있으면 LLM 처리
         if (session.transcriptBuffer && session.transcriptBuffer.length > 0) {
+            latencyTracker.start(sessionId);
+            latencyTracker.recordVADEnd(sessionId);
             const fullTranscript = session.transcriptBuffer.join(' ');
             logger.info(
                 `[Modular Pipeline] 전체 발화 완료 (${session.transcriptBuffer.length}개 문장, CallSid: ${session.callSid}): "${fullTranscript}"`
@@ -320,6 +320,7 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
         session.wasInterrupted = false;
         session.isTTSPlaying = true;
         session.pendingAIResponse = '';
+        session.responseStartTimestamp = undefined;
 
         logger.debug(`[Modular Pipeline] LLM 스트리밍 시작 준비 완료 (CallSid: ${session.callSid})`);
 
@@ -349,7 +350,6 @@ async function processLLMResponse(sessionId: string, userMessage: string): Promi
                 session.isTTSPlaying = false;
                 session.pendingAIResponse = undefined;
                 session.responseStartTimestamp = undefined;
-                latencyTracker.clear(sessionId);
             }
         });
 
@@ -460,7 +460,6 @@ async function sendAIResponse(sessionId: string, text: string): Promise<void> {
             session.isTTSPlaying = false;
             session.pendingAIResponse = undefined;
             session.responseStartTimestamp = undefined;
-            latencyTracker.clear(sessionId);
         }
     });
 

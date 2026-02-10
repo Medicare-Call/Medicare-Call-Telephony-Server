@@ -25,7 +25,7 @@ export const TTS_SPEED = process.env.TTS_SPEED || '1.0';
 // ElevenLabs TTS
 export const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
 export const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL';
-export const ELEVENLABS_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2';
+export const ELEVENLABS_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_flash_v2_5';
 
 if (TWILIO_CALLER_NUMBERS.length === 0) {
     logger.error('TWILIO_CALLER_NUMBERS environment variable is required (comma-separated)');
