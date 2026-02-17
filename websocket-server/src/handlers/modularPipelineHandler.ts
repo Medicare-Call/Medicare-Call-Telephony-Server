@@ -154,7 +154,7 @@ async function handleMediaMessage(sessionId: string, msg: TwilioMessage): Promis
         const speakingDuration = now - session.speechStartTimestamp;
         const hasTranscript = session.transcriptBuffer && session.transcriptBuffer.length > 0;
 
-        if ((speakingDuration > 500 && hasTranscript) || speakingDuration > 1500) {
+        if (speakingDuration > 500 && hasTranscript) {
             handleInterrupt(sessionId);
         }
     }
