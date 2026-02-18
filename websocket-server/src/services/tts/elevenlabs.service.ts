@@ -307,9 +307,9 @@ export class ElevenLabsService {
 
         session.twilioConn.send(JSON.stringify(message));
 
-        // 오디오 전송 시간 콜백 호출 (인터럽트 판단용)
+        // Twilio 오디오 전송 콜백 호출
         if (session.callbacks?.onAudioSentToTwilio) {
-            session.callbacks.onAudioSentToTwilio(Date.now());
+            session.callbacks.onAudioSentToTwilio(Date.now(), chunk);
         }
     }
 
