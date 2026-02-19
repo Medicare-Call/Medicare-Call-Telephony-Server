@@ -139,7 +139,12 @@ async function handleMediaMessage(sessionId: string, msg: TwilioMessage): Promis
     const audioChunk = Buffer.from(msg.media.payload, 'base64');
 
     // 1. 전체 통화 녹음용 버퍼
-    session.audioBuffer.push(audioChunk);
+    session.userAudioBuffer.push(audioChunk);
+    if (session.pendingAiChunks.length > 0) {
+        session.aiAudioBuffer.push(session.pendingAiChunks.shift()!);
+    } else {
+        session.aiAudioBuffer.push(Buffer.alloc(160, 0xff));
+    }
 
     // 2. VAD 처리
     const vadResult = await processAudioWithVAD(session, audioChunk, session.callSid);
@@ -239,6 +244,7 @@ function handleInterrupt(sessionId: string): void {
     session.lastAudioSentToTwilio = undefined;
     session.pendingAIResponse = undefined;
     session.lastAIHistorySavedAt = undefined;
+    session.pendingAiChunks = [];
 }
 
 async function handleStreamStop(sessionId: string): Promise<void> {
@@ -280,8 +286,10 @@ function buildTTSCallbacks(sessionId: string): TTSCallbacks {
     if (!session) return {};
 
     return {
-        onAudioSentToTwilio: (timestamp) => {
+        onAudioSentToTwilio: (timestamp, chunk) => {
             session.lastAudioSentToTwilio = timestamp;
+            // AI 오디오를 큐에 추가
+            session.pendingAiChunks.push(chunk);
             // 첫 청크 전송 시 레이턴시 기록
             if (!session.responseStartTimestamp) {
                 session.responseStartTimestamp = timestamp;

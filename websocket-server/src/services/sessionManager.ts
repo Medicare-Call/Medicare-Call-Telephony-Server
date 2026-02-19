@@ -17,7 +17,9 @@ export interface Session extends VadState {
     openAIApiKey: string;
     webhookUrl?: string;
     conversationHistory: { is_elderly: boolean; conversation: string }[];
-    audioBuffer: Buffer[];
+    userAudioBuffer: Buffer[];  // 사용자 음성 버퍼 (녹음용 L채널)
+    aiAudioBuffer: Buffer[];    // AI 음성 버퍼    (녹음용 R채널)
+    pendingAiChunks: Buffer[];  // AI 음성 임시 저장 큐 (사용자 음성과의 동기화를 위해 대기하는 버퍼)
     startTime?: Date;
     endTime?: Date;
     callStatus?: string;
@@ -66,7 +68,9 @@ export function createSession(
         openAIApiKey: config.openAIApiKey,
         webhookUrl: config.webhookUrl,
         conversationHistory: [],
-        audioBuffer: [],
+        userAudioBuffer: [],
+        aiAudioBuffer: [],
+        pendingAiChunks: [],
         startTime: new Date(),
         pipeline: config.pipeline,
         // VadState 필드 초기화
@@ -207,9 +211,9 @@ export function closeAllConnections(sessionId: string): void {
     };
 
     const uploadAudioToS3Promise = async () => {
-        if (session.audioBuffer && session.audioBuffer.length > 0) {
+        if (session.userAudioBuffer && session.userAudioBuffer.length > 0) {
             try {
-                await uploadAudioToS3(sessionId, session.audioBuffer);
+                await uploadStereoAudioToS3(sessionId, session.userAudioBuffer, session.aiAudioBuffer);
             } catch (error) {
                 console.error(`(S3-Audio) 업로드 Promise 실패 (CallSid: ${session.callSid}):`, error);
             }
@@ -262,7 +266,12 @@ async function uploadConversationToS3(sessionId: string, conversationHistory: an
     }
 }
 
-async function uploadAudioToS3(sessionId: string, audioChunks: Buffer[]): Promise<void> {
+// 스테레오 WAV로 S3 업로드 (L: 사용자, R: AI)
+async function uploadStereoAudioToS3(
+    sessionId: string,
+    userChunks: Buffer[],
+    aiChunks: Buffer[]
+): Promise<void> {
     const s3 = new AWS.S3({
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -275,26 +284,39 @@ async function uploadAudioToS3(sessionId: string, audioChunks: Buffer[]): Promis
         return;
     }
 
-    // Twilio Media Stream은 8000Hz, 8-bit μ-law 형식
+    const FRAME_SIZE = 160; // 8kHz u-law 20ms 기준 프레임 크기
+    const maxLength = Math.max(userChunks.length, aiChunks.length);
+    const ULAW_SILENCE = Buffer.alloc(FRAME_SIZE, 0xff);
+
+    // 8000Hz, 8-bit μ-law, 스테레오
     const wavEncoder = new Writer({
         sampleRate: 8000,
-        channels: 1,
+        channels: 2,
         bitDepth: 8,
-        format: 7, // 7 for μ-law
+        format: 7,
     });
 
     const passthrough = new PassThrough();
     wavEncoder.pipe(passthrough);
 
-    audioChunks.forEach((chunk) => {
-        wavEncoder.write(chunk);
-    });
+    for (let i = 0; i < maxLength; i++) {
+        const userChunk = userChunks[i] || ULAW_SILENCE;
+        const aiChunk = aiChunks[i] || ULAW_SILENCE;
+
+        // 스테레오 인터리브 적용
+        const stereoChunk = Buffer.alloc(FRAME_SIZE * 2);
+        for (let j = 0; j < FRAME_SIZE; j++) {
+            stereoChunk[j * 2] = userChunk[j];
+            stereoChunk[j * 2 + 1] = aiChunk[j];
+        }
+        wavEncoder.write(stereoChunk);
+    }
     wavEncoder.end();
 
     const fileName = `${sessionId}.wav`;
     const params: AWS.S3.PutObjectRequest = {
         Bucket: bucketName,
-        Key: `audio/${fileName}`, // 오디오 파일은 audio/ 폴더에 저장
+        Key: `audio/${fileName}`,
         Body: passthrough,
         ContentType: 'audio/wav',
     };

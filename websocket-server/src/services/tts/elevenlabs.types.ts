@@ -4,8 +4,8 @@ import { WebSocket } from 'ws';
  * ElevenLabs TTS 콜백
  */
 export interface TTSCallbacks {
-    onAudioSentToTwilio?: (timestamp: number) => void;  // Twilio에 오디오 전송 시
-    onStreamComplete?: () => void;                      // flush 후 오디오 완료 시
+    onAudioSentToTwilio?: (timestamp: number, chunk: Buffer) => void;   // Twilio에 오디오 전송 시
+    onStreamComplete?: () => void;                                      // flush 후 오디오 완료 시
 }
 
 /**
