@@ -75,7 +75,7 @@ async function handleTwilioMessage(sessionId: string, data: RawData): Promise<vo
             const audioChunk = Buffer.from(msg.media.payload, 'base64');
 
             // 전체 통화 녹음용 버퍼에 저장
-            session.audioBuffer.push(audioChunk);
+            session.userAudioBuffer.push(audioChunk);
 
             // GPT Realtime API로 모든 오디오 전송
             if (isOpen(session.modelConn)) {
@@ -193,7 +193,7 @@ function handleOpenAIMessage(sessionId: string, data: RawData): void {
                 if (event.item_id) session.lastAssistantItem = event.item_id;
 
                 const aiAudioChunk = Buffer.from(event.delta, 'base64');
-                session.audioBuffer.push(aiAudioChunk);
+                session.aiAudioBuffer.push(aiAudioChunk);
 
                 jsonSend(session.twilioConn, {
                     event: 'media',
