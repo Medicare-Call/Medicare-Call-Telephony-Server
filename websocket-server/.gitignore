@@ -39,3 +39,7 @@ next-env.d.ts
 
 # VAD audio files
 /temp_audio
+
+# 테스트 스크립트 생성 결과물
+/scripts/output/*
+!/scripts/output/.gitkeep
